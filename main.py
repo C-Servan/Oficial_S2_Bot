@@ -30,8 +30,9 @@ try:
 except FileNotFoundError:
     instrucciones_sistema = "Eres el Oficial S-2 de GUN4FUN. Manual no encontrado. Procede con protocolos estándar."
 
+# CORRECCIÓN 404: Se especifica la ruta completa del modelo
 model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
+    model_name="models/gemini-1.5-flash",
     system_instruction=instrucciones_sistema
 )
 
@@ -47,10 +48,14 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # El bot sabe quién le habla para aplicar la jerarquía del manual
     contexto_usuario = f"[Mensaje de {username}]: "
     
-    chat = model.start_chat(history=[])
-    response = chat.send_message(contexto_usuario + mensaje_texto)
-    
-    await update.message.reply_text(response.text)
+    try:
+        chat = model.start_chat(history=[])
+        response = chat.send_message(contexto_usuario + mensaje_texto)
+        await update.message.reply_text(response.text)
+    except Exception as e:
+        print(f"Error en el núcleo de IA: {e}")
+        # Notificación discreta en caso de fallo de red de Gemini
+        await update.message.reply_text("⚠️ Interferencia en el enlace de datos. Reintente el comando.")
 
 # --- LANZAMIENTO ---
 def main():
@@ -59,14 +64,14 @@ def main():
         return
 
     # EJECUCIÓN DEL HILO PARA EVITAR EL TIMEOUT EN RENDER
-    # Esto lanza el servidor web en paralelo antes de que el bot bloquee el hilo principal
     threading.Thread(target=run_flask, daemon=True).start()
 
+    # CORRECCIÓN CONFLICT: drop_pending_updates limpia mensajes antiguos al arrancar
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
     
     print("Oficial de Inteligencia S-2 en línea. ¡RELOAD!")
-    application.run_polling()
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
