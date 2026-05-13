@@ -22,8 +22,8 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 
 # --- CONFIGURACIÓN DE INTELIGENCIA ---
-# Adaptado al nuevo cliente GenAI con configuración de reintentos
-client = genai.Client(api_key=GEMINI_KEY)
+# RECALIBRACIÓN: Forzamos el uso de la versión estable de la API
+client = genai.Client(api_key=GEMINI_KEY, http_options={'api_version': 'v1'})
 
 # Carga del manual de inteligencia
 try:
@@ -32,8 +32,8 @@ try:
 except FileNotFoundError:
     instrucciones_sistema = "Eres el Oficial S-2 de GUN4FUN. Manual no encontrado. Procede con protocolos estándar."
 
-# RECALIBRACIÓN DEFINITIVA: Preparado para el motor 1.5-flash
-model_id = "gemini-1.5-flash"
+# RECALIBRACIÓN DEFINITIVA: Nombre técnico completo para evitar el 404
+model_id = "models/gemini-1.5-flash"
 
 # --- LÓGICA DE RESPUESTA CON DIAGNÓSTICO ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -48,7 +48,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contexto_usuario = f"[Mensaje de {username}]: {mensaje_texto}"
     
     try:
-        # Generación directa usando el nuevo SDK para evitar errores de sesión
+        # Generación directa usando el nuevo SDK
         response = client.models.generate_content(
             model=model_id,
             config={'system_instruction': instrucciones_sistema},
@@ -66,16 +66,16 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Detalle del error: {error_msg}")
         print(f"-------------------------------")
         
-        # Respuesta de emergencia si el modelo principal falla por cuotas o disponibilidad
-        if "404" in error_msg or "not found" in error_msg or "429" in error_msg:
+        # Respuesta de emergencia: Si 1.5-flash falla, intentamos con el motor pro estable
+        if "404" in error_msg or "not found" in error_msg:
             try:
                 resp = client.models.generate_content(
-                    model="gemini-1.5-pro", # Respaldo a Pro en el nuevo SDK
+                    model="models/gemini-1.5-pro", 
                     contents=f"{instrucciones_sistema}\n\n{contexto_usuario}"
                 )
                 await update.message.reply_text(resp.text)
             except Exception as e_backup:
-                await update.message.reply_text("❌ Error persistente de modelo. Verifique la API KEY.")
+                await update.message.reply_text("❌ Error crítico: Modelo no disponible en su región de API.")
         else:
             await update.message.reply_text(f"⚠️ Interferencia en el enlace: {error_msg[:40]}...")
 
@@ -93,7 +93,7 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
     
     print("Oficial de Inteligencia S-2 en línea. ¡RELOAD!")
-    # drop_pending_updates=True y stop_signals=None para estabilidad total en Render
+    # drop_pending_updates=True soluciona el error 'Conflict'
     application.run_polling(drop_pending_updates=True, stop_signals=None)
 
 if __name__ == "__main__":
