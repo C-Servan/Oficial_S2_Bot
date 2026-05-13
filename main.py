@@ -58,6 +58,10 @@ def main():
         print("ERROR: Faltan las llaves de acceso en las variables de entorno.")
         return
 
+    # EJECUCIÓN DEL HILO PARA EVITAR EL TIMEOUT EN RENDER
+    # Esto lanza el servidor web en paralelo antes de que el bot bloquee el hilo principal
+    threading.Thread(target=run_flask, daemon=True).start()
+
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
     
