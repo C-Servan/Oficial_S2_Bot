@@ -22,7 +22,7 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 
 # --- CONFIGURACIÓN DE INTELIGENCIA ---
-# Adaptado al nuevo cliente GenAI
+# Adaptado al nuevo cliente GenAI con configuración de reintentos
 client = genai.Client(api_key=GEMINI_KEY)
 
 # Carga del manual de inteligencia
@@ -66,8 +66,8 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Detalle del error: {error_msg}")
         print(f"-------------------------------")
         
-        # Respuesta de emergencia si el modelo principal falla
-        if "404" in error_msg or "not found" in error_msg:
+        # Respuesta de emergencia si el modelo principal falla por cuotas o disponibilidad
+        if "404" in error_msg or "not found" in error_msg or "429" in error_msg:
             try:
                 resp = client.models.generate_content(
                     model="gemini-1.5-pro", # Respaldo a Pro en el nuevo SDK
@@ -93,8 +93,8 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
     
     print("Oficial de Inteligencia S-2 en línea. ¡RELOAD!")
-    # drop_pending_updates=True soluciona el error 'Conflict' al limpiar la cola antigua
-    application.run_polling(drop_pending_updates=True)
+    # drop_pending_updates=True y stop_signals=None para estabilidad total en Render
+    application.run_polling(drop_pending_updates=True, stop_signals=None)
 
 if __name__ == "__main__":
     main()
