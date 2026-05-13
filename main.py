@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
 # --- MINI SERVIDOR PARA RENDER ---
-app = Flask(_name_)
+app = Flask(__name__)
 @app.route('/')
 def health_check():
     return "Oficial S-2 Operativo", 200
