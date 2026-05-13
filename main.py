@@ -17,10 +17,13 @@ def run_flask():
 
 # --- CONFIGURACIÓN DE SEGURIDAD ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-GROQ_API_KEY = os.environ.get('GROQ_API_KEY') # Cambia el nombre en Render de GEMINI_KEY a GROQ_API_KEY
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 
-# --- CONFIGURACIÓN DE INTELIGENCIA (GROQ/LLAMA-3) ---
+# --- CONFIGURACIÓN DE INTELIGENCIA (GROQ) ---
 client = Groq(api_key=GROQ_API_KEY)
+
+# Nombre del modelo actualizado y ultra-estable
+MODELO_ACTUAL = "llama-3.3-70b-versatile"
 
 try:
     with open("prom_Oficial_Inteligencia.txt", "r", encoding="utf-8") as f:
@@ -36,19 +39,15 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_texto = update.message.text
     
     try:
-        # Petición de chat a Groq usando Llama-3-70b (potente y rápido)
+        # Petición simplificada para evitar Error 400
         chat_completion = client.chat.completions.create(
+            model=MODELO_ACTUAL,
             messages=[
-                {
-                    "role": "system",
-                    "content": instrucciones_system,
-                },
-                {
-                    "role": "user",
-                    "content": mensaje_texto,
-                }
+                {"role": "system", "content": instrucciones_system},
+                {"role": "user", "content": mensaje_texto}
             ],
-            model="llama3-70b-8192",
+            temperature=0.7,
+            max_tokens=2048
         )
         
         respuesta = chat_completion.choices[0].message.content
@@ -59,13 +58,26 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ El núcleo de Groq no devolvió texto.")
         
     except Exception as e:
-        print(f"--- ERROR CRÍTICO EN GROQ ---\n{e}")
-        await update.message.reply_text(f"❌ Error de enlace: {str(e)[:50]}")
+        error_str = str(e)
+        print(f"--- ERROR EN GROQ ---\n{error_str}")
+        
+        # Fallback de emergencia si el modelo específico no existe
+        if "404" in error_str or "model" in error_str:
+            try:
+                # Intento con el modelo pequeño (siempre disponible)
+                res_backup = client.chat.completions.create(
+                    model="llama3-8b-8192",
+                    messages=[{"role": "user", "content": mensaje_texto}]
+                )
+                await update.message.reply_text(res_backup.choices[0].message.content)
+            except Exception:
+                await update.message.reply_text(f"❌ Error de configuración de modelo en Groq.")
+        else:
+            await update.message.reply_text(f"❌ Error de enlace: {error_str[:60]}...")
 
 # --- LANZAMIENTO ---
 def main():
     if not TELEGRAM_TOKEN or not GROQ_API_KEY:
-        print("Faltan variables: TELEGRAM_TOKEN o GROQ_API_KEY")
         return
 
     threading.Thread(target=run_flask, daemon=True).start()
