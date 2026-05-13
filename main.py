@@ -30,7 +30,7 @@ try:
 except FileNotFoundError:
     instrucciones_sistema = "Eres el Oficial S-2 de GUN4FUN. Manual no encontrado. Procede con protocolos estándar."
 
-# Configuración del modelo - AJUSTE DE COORDENADAS: 'gemini-1.5-flash' sin prefijos adicionales
+# RECALIBRACIÓN DEFINITIVA: Usamos solo el nombre base del modelo
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
     system_instruction=instrucciones_sistema
@@ -49,36 +49,30 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contexto_usuario = f"[Mensaje de {username}]: "
     
     try:
-        # Intento de comunicación directa con el núcleo
-        # Usamos generate_content para evitar conflictos de sesión de chat
+        # Generación directa para evitar errores de sesión
         response = model.generate_content(contexto_usuario + mensaje_texto)
         
-        if response.text:
+        if response and response.text:
             await update.message.reply_text(response.text)
         else:
-            await update.message.reply_text("⚠️ El núcleo no devolvió datos. Revise filtros de seguridad.")
+            await update.message.reply_text("⚠️ El núcleo no devolvió una respuesta válida.")
         
     except Exception as e:
-        # LOGS DETALLADOS PARA EL COMANDANTE
         error_msg = str(e)
         print(f"--- ERROR TÁCTICO DETECTADO ---")
         print(f"Detalle del error: {error_msg}")
         print(f"-------------------------------")
         
-        # SISTEMA DE RESPALDO AUTOMÁTICO
+        # Respuesta de emergencia si el modelo 1.5 falla por compatibilidad de librería
         if "404" in error_msg or "not found" in error_msg:
             try:
-                # Intento con el modelo Pro si el Flash falla por versión
                 backup_model = genai.GenerativeModel("gemini-pro")
                 resp = backup_model.generate_content(f"{instrucciones_sistema}\n\n{contexto_usuario}{mensaje_texto}")
                 await update.message.reply_text(resp.text)
             except Exception as e_backup:
-                print(f"Fallo en backup: {e_backup}")
-                await update.message.reply_text("❌ Error de enlace persistente. Revise API KEY en Google AI Studio.")
+                await update.message.reply_text("❌ Error persistente de modelo. Verifique la API KEY.")
         else:
-            await update.message.reply_text(
-                f"⚠️ Interferencia en el enlace. Error: {error_msg[:50]}..."
-            )
+            await update.message.reply_text(f"⚠️ Interferencia en el enlace: {error_msg[:40]}...")
 
 # --- LANZAMIENTO ---
 def main():
@@ -94,7 +88,7 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
     
     print("Oficial de Inteligencia S-2 en línea. ¡RELOAD!")
-    # drop_pending_updates=True es CRÍTICO para evitar el error 'Conflict' al reiniciar
+    # drop_pending_updates=True soluciona el error 'Conflict' al limpiar la cola antigua
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
