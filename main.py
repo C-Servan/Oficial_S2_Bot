@@ -1,7 +1,6 @@
 import os
 import threading
 from flask import Flask
-# CAMBIO A LIBRERÍA ESTABLE
 import google.generativeai as genai
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -20,7 +19,7 @@ def run_flask():
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 
-# --- CONFIGURACIÓN DE INTELIGENCIA (MODO ESTABLE) ---
+# --- CONFIGURACIÓN DE INTELIGENCIA (MÁXIMA COMPATIBILIDAD) ---
 genai.configure(api_key=GEMINI_KEY)
 
 try:
@@ -29,11 +28,8 @@ try:
 except FileNotFoundError:
     instrucciones_system = "Eres el Oficial S-2 de GUN4FUN. Procede con protocolos estándar."
 
-# Configuración del modelo clásico
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    system_instruction=instrucciones_system
-)
+# RECALIBRACIÓN: Usamos el alias 'gemini-pro' que redirige automáticamente al modelo disponible
+model = genai.GenerativeModel('gemini-1.5-flash') 
 
 # --- LÓGICA DE RESPUESTA ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -43,29 +39,33 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_texto = update.message.text
     
     try:
-        # Generación con la librería estándar de Google
-        response = model.generate_content(mensaje_texto)
+        # Intento A: Inyección directa de contexto para evitar errores de System Instruction
+        prompt_completo = f"SISTEMA: {instrucciones_system}\n\nUSUARIO: {mensaje_texto}"
+        
+        response = model.generate_content(prompt_completo)
         
         if response and response.text:
             await update.message.reply_text(response.text)
         else:
-            await update.message.reply_text("⚠️ El núcleo no devolvió texto.")
+            await update.message.reply_text("⚠️ El núcleo no devolvió texto. Revise logs de seguridad.")
         
     except Exception as e:
         error_msg = str(e)
-        print(f"--- ERROR TÁCTICO DETECTADO ---\n{error_msg}")
+        print(f"--- ERROR CRÍTICO ---")
+        print(error_msg)
         
-        # Fallback directo si falla el sistema de instrucciones
+        # Último aliento: Intento con el modelo 1.0 (el más compatible de la historia)
         try:
-            model_alt = genai.GenerativeModel("gemini-1.5-flash")
-            resp_alt = model_alt.generate_content(f"{instrucciones_system}\n\nPregunta: {mensaje_texto}")
-            await update.message.reply_text(resp_alt.text)
+            fallback_model = genai.GenerativeModel('gemini-pro')
+            res = fallback_model.generate_content(f"Responde como oficial de inteligencia: {mensaje_texto}")
+            await update.message.reply_text(res.text)
         except Exception:
-            await update.message.reply_text(f"❌ Error de API: Verifique si su API KEY tiene acceso a Gemini 1.5.")
+            await update.message.reply_text(f"❌ FALLO DE AUTORIZACIÓN: Su API KEY no es válida o está restringida por región.")
 
 # --- LANZAMIENTO ---
 def main():
     if not TELEGRAM_TOKEN or not GEMINI_KEY:
+        print("ERROR: Faltan variables de entorno.")
         return
 
     threading.Thread(target=run_flask, daemon=True).start()
