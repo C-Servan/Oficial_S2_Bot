@@ -1,7 +1,8 @@
 import os
 import threading
 from flask import Flask
-import google.generativeai as genai
+# Sincronizado con google-genai en su requirements.txt
+from google import genai
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
@@ -21,7 +22,8 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 
 # --- CONFIGURACIÓN DE INTELIGENCIA ---
-genai.configure(api_key=GEMINI_KEY)
+# Adaptado al nuevo cliente GenAI
+client = genai.Client(api_key=GEMINI_KEY)
 
 # Carga del manual de inteligencia
 try:
@@ -30,11 +32,8 @@ try:
 except FileNotFoundError:
     instrucciones_sistema = "Eres el Oficial S-2 de GUN4FUN. Manual no encontrado. Procede con protocolos estándar."
 
-# RECALIBRACIÓN DEFINITIVA: Usamos solo el nombre base del modelo
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    system_instruction=instrucciones_sistema
-)
+# RECALIBRACIÓN DEFINITIVA: Preparado para el motor 1.5-flash
+model_id = "gemini-1.5-flash"
 
 # --- LÓGICA DE RESPUESTA CON DIAGNÓSTICO ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -46,11 +45,15 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_texto = update.message.text
 
     # El bot sabe quién le habla para aplicar la jerarquía
-    contexto_usuario = f"[Mensaje de {username}]: "
+    contexto_usuario = f"[Mensaje de {username}]: {mensaje_texto}"
     
     try:
-        # Generación directa para evitar errores de sesión
-        response = model.generate_content(contexto_usuario + mensaje_texto)
+        # Generación directa usando el nuevo SDK para evitar errores de sesión
+        response = client.models.generate_content(
+            model=model_id,
+            config={'system_instruction': instrucciones_sistema},
+            contents=contexto_usuario
+        )
         
         if response and response.text:
             await update.message.reply_text(response.text)
@@ -63,11 +66,13 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Detalle del error: {error_msg}")
         print(f"-------------------------------")
         
-        # Respuesta de emergencia si el modelo 1.5 falla por compatibilidad de librería
+        # Respuesta de emergencia si el modelo principal falla
         if "404" in error_msg or "not found" in error_msg:
             try:
-                backup_model = genai.GenerativeModel("gemini-pro")
-                resp = backup_model.generate_content(f"{instrucciones_sistema}\n\n{contexto_usuario}{mensaje_texto}")
+                resp = client.models.generate_content(
+                    model="gemini-1.5-pro", # Respaldo a Pro en el nuevo SDK
+                    contents=f"{instrucciones_sistema}\n\n{contexto_usuario}"
+                )
                 await update.message.reply_text(resp.text)
             except Exception as e_backup:
                 await update.message.reply_text("❌ Error persistente de modelo. Verifique la API KEY.")
