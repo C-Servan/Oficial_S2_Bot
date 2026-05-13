@@ -1,7 +1,20 @@
 import os
+import threading
+from flask import Flask
 import google.generativeai as genai
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
+
+# --- MINI SERVIDOR PARA RENDER ---
+app = Flask(_name_)
+@app.route('/')
+def health_check():
+    return "Oficial S-2 Operativo", 200
+
+def run_flask():
+    # Render asigna un puerto automáticamente en la variable PORT
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
 
 # --- CONFIGURACIÓN DE SEGURIDAD (Se rellenará en Render) ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
