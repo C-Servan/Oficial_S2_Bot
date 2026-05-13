@@ -20,16 +20,17 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 
 # --- CONFIGURACIÓN DE INTELIGENCIA ---
-# Usamos la configuración estándar que no da problemas de argumentos
+# RECALIBRACIÓN: Cliente con parámetros de compatibilidad total
 client = genai.Client(api_key=GEMINI_KEY)
 
 try:
     with open("prom_Oficial_Inteligencia.txt", "r", encoding="utf-8") as f:
-        instrucciones_sistema = f.read()
+        instrucciones_system = f.read()
 except FileNotFoundError:
-    instrucciones_sistema = "Eres el Oficial S-2 de GUN4FUN. Procede con protocolos estándar."
+    instrucciones_system = "Eres el Oficial S-2 de GUN4FUN. Procede con protocolos estándar."
 
-model_id = "gemini-1.5-flash"
+# IMPORTANTE: Usamos el nombre técnico largo para evitar el 404
+model_id = "models/gemini-1.5-flash"
 
 # --- LÓGICA DE RESPUESTA ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41,36 +42,37 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_texto = update.message.text
     
     try:
-        # Simplificamos la configuración para evitar el Error 400
-        # Pasamos las instrucciones dentro del config de forma limpia
+        # Intento A: Configuración estándar con nombre completo
         response = client.models.generate_content(
             model=model_id,
-            config={'system_instruction': instrucciones_sistema},
+            config={'system_instruction': instrucciones_system},
             contents=mensaje_texto
         )
         
         if response and response.text:
             await update.message.reply_text(response.text)
         else:
-            await update.message.reply_text("⚠️ El núcleo no devolvió una respuesta válida.")
+            await update.message.reply_text("⚠️ El núcleo no devolvió texto.")
         
     except Exception as e:
         error_msg = str(e)
         print(f"--- ERROR TÁCTICO DETECTADO ---\n{error_msg}")
         
-        # Si falla el flash, intentamos una llamada de emergencia sin system_instruction
+        # Intento B (Modo Supervivencia): Sin System Instruction y con modelo Pro
         try:
+            # Forzamos el modelo Pro con el nombre completo
             resp_emergencia = client.models.generate_content(
-                model="gemini-1.5-pro",
-                contents=f"{instrucciones_sistema}\n\nUsuario dice: {mensaje_texto}"
+                model="models/gemini-1.5-pro",
+                contents=f"INSTRUCCIONES: {instrucciones_system}\n\nUSUARIO: {mensaje_texto}"
             )
             await update.message.reply_text(resp_emergencia.text)
-        except Exception:
-            await update.message.reply_text(f"❌ Error crítico en el núcleo: {error_msg[:50]}")
+        except Exception as e2:
+            await update.message.reply_text(f"❌ Fallo total del sistema API. Verifique cuotas o API Key.")
 
 # --- LANZAMIENTO ---
 def main():
     if not TELEGRAM_TOKEN or not GEMINI_KEY:
+        print("Faltan credenciales.")
         return
 
     threading.Thread(target=run_flask, daemon=True).start()
