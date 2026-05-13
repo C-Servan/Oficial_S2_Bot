@@ -30,9 +30,9 @@ try:
 except FileNotFoundError:
     instrucciones_sistema = "Eres el Oficial S-2 de GUN4FUN. Manual no encontrado. Procede con protocolos estándar."
 
-# Configuración del modelo
+# Configuración del modelo - RECALIBRADO a 'gemini-1.5-flash-latest' para máxima compatibilidad
 model = genai.GenerativeModel(
-    model_name="models/gemini-1.5-flash",
+    model_name="gemini-1.5-flash-latest",
     system_instruction=instrucciones_sistema
 )
 
@@ -50,21 +50,31 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         # Intento de comunicación con el núcleo Gemini
-        chat = model.start_chat(history=[])
-        response = chat.send_message(contexto_usuario + mensaje_texto)
+        # Se usa generate_content directo para mayor estabilidad ante errores de versión
+        response = model.generate_content(contexto_usuario + mensaje_texto)
         await update.message.reply_text(response.text)
         
     except Exception as e:
         # LOGS DETALLADOS PARA EL COMANDANTE
+        error_msg = str(e)
         print(f"--- ERROR TÁCTICO DETECTADO ---")
-        print(f"Detalle del error: {str(e)}")
+        print(f"Detalle del error: {error_msg}")
         print(f"-------------------------------")
         
-        # Respuesta en Telegram indicando el fallo de enlace
-        await update.message.reply_text(
-            f"⚠️ Interferencia crítica en el enlace. Error detectado en el núcleo.\n"
-            f"Comandante, verifique los logs de Render para la instrucción de recalibrado."
-        )
+        # SISTEMA DE RESPALDO AUTOMÁTICO EN CASO DE 404
+        if "404" in error_msg:
+            try:
+                backup_model = genai.GenerativeModel("gemini-pro")
+                resp = backup_model.generate_content(f"{instrucciones_sistema}\n\n{contexto_usuario}{mensaje_texto}")
+                await update.message.reply_text(resp.text)
+            except Exception as e_backup:
+                await update.message.reply_text(f"❌ Fallo total de enlace. Revise API KEY.\nDetalle: {e_backup}")
+        else:
+            # Respuesta en Telegram indicando el fallo de enlace genérico
+            await update.message.reply_text(
+                f"⚠️ Interferencia crítica en el enlace. Error detectado en el núcleo.\n"
+                f"Comandante, verifique los logs de Render para la instrucción de recalibrado."
+            )
 
 # --- LANZAMIENTO ---
 def main():
