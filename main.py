@@ -22,7 +22,7 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 
 # --- CONFIGURACIÓN DE INTELIGENCIA ---
-# RECALIBRACIÓN: Forzamos el uso de la versión estable de la API
+# Forzamos la versión estable de la API para evitar el error 404 previo
 client = genai.Client(api_key=GEMINI_KEY, http_options={'api_version': 'v1'})
 
 # Carga del manual de inteligencia
@@ -32,7 +32,7 @@ try:
 except FileNotFoundError:
     instrucciones_sistema = "Eres el Oficial S-2 de GUN4FUN. Manual no encontrado. Procede con protocolos estándar."
 
-# RECALIBRACIÓN DEFINITIVA: Nombre técnico completo para evitar el 404
+# RECALIBRACIÓN DEFINITIVA: Nombre técnico completo
 model_id = "models/gemini-1.5-flash"
 
 # --- LÓGICA DE RESPUESTA CON DIAGNÓSTICO ---
@@ -66,7 +66,6 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Detalle del error: {error_msg}")
         print(f"-------------------------------")
         
-        # Respuesta de emergencia: Si 1.5-flash falla, intentamos con el motor pro estable
         if "404" in error_msg or "not found" in error_msg:
             try:
                 resp = client.models.generate_content(
@@ -74,15 +73,15 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     contents=f"{instrucciones_sistema}\n\n{contexto_usuario}"
                 )
                 await update.message.reply_text(resp.text)
-            except Exception as e_backup:
-                await update.message.reply_text("❌ Error crítico: Modelo no disponible en su región de API.")
+            except Exception:
+                await update.message.reply_text("❌ Error persistente de modelo.")
         else:
             await update.message.reply_text(f"⚠️ Interferencia en el enlace: {error_msg[:40]}...")
 
 # --- LANZAMIENTO ---
 def main():
     if not TELEGRAM_TOKEN or not GEMINI_KEY:
-        print("ERROR: Faltan las llaves de acceso en las variables de entorno.")
+        print("ERROR: Faltan las llaves de acceso.")
         return
 
     # Ejecución del hilo para evitar el timeout en Render
@@ -93,8 +92,11 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
     
     print("Oficial de Inteligencia S-2 en línea. ¡RELOAD!")
-    # drop_pending_updates=True soluciona el error 'Conflict'
-    application.run_polling(drop_pending_updates=True, stop_signals=None)
+    
+    # RECALIBRACIÓN DE POLLING: 
+    # drop_pending_updates=True limpia mensajes viejos.
+    # close_loop=False evita conflictos de cierre en hilos de Render.
+    application.run_polling(drop_pending_updates=True, close_loop=False)
 
 if __name__ == "__main__":
     main()
