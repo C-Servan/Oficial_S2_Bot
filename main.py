@@ -1,7 +1,10 @@
 import os
 import threading
+import time
 from flask import Flask
 from groq import Groq
+from mistralai import Mistral
+from openai import OpenAI
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
@@ -9,7 +12,8 @@ from telegram.ext import Application, MessageHandler, filters, ContextTypes
 app = Flask(__name__)
 @app.route('/')
 def health_check():
-    return "Oficial S-2 Operativo (Motor: Llama-3)", 200
+    # Actualizado para reflejar el nuevo estado multi-núcleo
+    return "Oficial S-2 Operativo (Motor: Triple-IA)", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -18,30 +22,39 @@ def run_flask():
 # --- CONFIGURACIÓN DE SEGURIDAD ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY')
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
 
-# --- CONFIGURACIÓN DE INTELIGENCIA (GROQ) ---
-client = Groq(api_key=GROQ_API_KEY)
+# --- CONFIGURACIÓN DE INTELIGENCIA (TRIPLE NÚCLEO) ---
+client_groq = Groq(api_key=GROQ_API_KEY)
+client_mistral = Mistral(api_key=MISTRAL_API_KEY)
+client_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
 
-# Nombre del modelo actualizado y ultra-estable
-MODELO_ACTUAL = "llama-3.3-70b-versatile"
+# Nombre del modelo Groq principal
+MODELO_GROQ = "llama-3.3-70b-versatile"
 
 try:
     with open("prom_Oficial_Inteligencia.txt", "r", encoding="utf-8") as f:
         instrucciones_system = f.read()
 except FileNotFoundError:
-    instrucciones_system = "Eres el Oficial S-2 de GUN4FUN. Procede con protocolos estándar."
+    # Opción B: Personalidad base reforzada si falta el archivo
+    instrucciones_system = (
+        "Eres el Oficial de Inteligencia S-2 de la unidad GUN4FUN. "
+        "Tu tono es militar, eficiente, directo y profesional. "
+        "Tu misión es asesorar a las tropas y gestionar el flujo de información de combate."
+    )
 
-# --- LÓGICA DE RESPUESTA ---
+# --- LÓGICA DE RESPUESTA EN CASCADA (OPCIÓN A) ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
     mensaje_texto = update.message.text
     
+    # 1. INTENTO CON GROQ (PLAN A)
     try:
-        # Petición simplificada para evitar Error 400
-        chat_completion = client.chat.completions.create(
-            model=MODELO_ACTUAL,
+        chat_completion = client_groq.chat.completions.create(
+            model=MODELO_GROQ,
             messages=[
                 {"role": "system", "content": instrucciones_system},
                 {"role": "user", "content": mensaje_texto}
@@ -49,44 +62,68 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             temperature=0.7,
             max_tokens=2048
         )
-        
         respuesta = chat_completion.choices[0].message.content
-        
         if respuesta:
             await update.message.reply_text(respuesta)
-        else:
-            await update.message.reply_text("⚠️ El núcleo de Groq no devolvió texto.")
-        
+            return
+
     except Exception as e:
-        error_str = str(e)
-        print(f"--- ERROR EN GROQ ---\n{error_str}")
-        
-        # Fallback de emergencia si el modelo específico no existe
-        if "404" in error_str or "model" in error_str:
-            try:
-                # Intento con el modelo pequeño (siempre disponible)
-                res_backup = client.chat.completions.create(
-                    model="llama3-8b-8192",
-                    messages=[{"role": "user", "content": mensaje_texto}]
-                )
-                await update.message.reply_text(res_backup.choices[0].message.content)
-            except Exception:
-                await update.message.reply_text(f"❌ Error de configuración de modelo en Groq.")
-        else:
-            await update.message.reply_text(f"❌ Error de enlace: {error_str[:60]}...")
+        print(f"⚠️ PLAN A (Groq) FALLIDO: {e}")
+
+    # 2. INTENTO CON MISTRAL (PLAN B)
+    if MISTRAL_API_KEY:
+        try:
+            print("🔄 Activando Plan B (Mistral)...")
+            res_mistral = client_mistral.chat.complete(
+                model="mistral-small-latest",
+                messages=[
+                    {"role": "system", "content": instrucciones_system},
+                    {"role": "user", "content": mensaje_texto}
+                ]
+            )
+            await update.message.reply_text(res_mistral.choices[0].message.content)
+            return
+        except Exception as e2:
+            print(f"⚠️ PLAN B (Mistral) FALLIDO: {e2}")
+
+    # 3. INTENTO CON DEEPSEEK (PLAN C)
+    if DEEPSEEK_API_KEY:
+        try:
+            print("🔄 Activando Plan C (DeepSeek)...")
+            res_ds = client_deepseek.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": instrucciones_system},
+                    {"role": "user", "content": mensaje_texto}
+                ]
+            )
+            await update.message.reply_text(res_ds.choices[0].message.content)
+            return
+        except Exception as e3:
+            print(f"⚠️ PLAN C (DeepSeek) FALLIDO: {e3}")
+
+    # FALLBACK FINAL
+    await update.message.reply_text("❌ INTERFERENCIA TOTAL: Todos los canales de inteligencia están saturados. Reintentar en 60 segundos.")
 
 # --- LANZAMIENTO ---
 def main():
-    if not TELEGRAM_TOKEN or not GROQ_API_KEY:
+    if not TELEGRAM_TOKEN:
+        print("Falta TELEGRAM_TOKEN. Abortando misión.")
         return
 
     threading.Thread(target=run_flask, daemon=True).start()
 
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
-    
-    print("Oficial de Inteligencia S-2 en línea (Motor Groq). ¡RELOAD!")
-    application.run_polling(drop_pending_updates=True)
+    # Opción B: Añadimos un protocolo de reconexión similar al del Instructor
+    while True:
+        try:
+            application = Application.builder().token(TELEGRAM_TOKEN).build()
+            application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
+            
+            print("Oficial S-2 Triple-Core en línea. ¡RELOAD!")
+            application.run_polling(drop_pending_updates=True)
+        except Exception as e:
+            print(f"⚠️ ERROR DE CONEXIÓN EN S-2: {e}")
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
