@@ -3,7 +3,7 @@ import threading
 import time
 from flask import Flask
 from groq import Groq
-from mistralai import Mistral
+from mistralai.client import MistralClient as Mistral
 from openai import OpenAI
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
