@@ -34,7 +34,6 @@ def obtener_datos_enciclopedia():
         if not datos:
             return "No hay datos registrados en la enciclopedia aún."
         
-        # Formateamos los datos para que la IA los entienda como manuales de campo
         contexto = "\n--- DATOS REALES RECUPERADOS DE FIREBASE (ENCICLOPEDIA S-2) ---\n"
         contexto += json.dumps(datos, indent=2, ensure_ascii=False)
         contexto += "\n--- FIN DE LOS DATOS REALES ---\n"
@@ -65,28 +64,24 @@ client_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepsee
 
 MODELO_GROQ = "llama-3.3-70b-versatile"
 
-# CARGA DEL NUEVO ARCHIVO DE PROTOCOLO REESTRUCTURADO
+# CARGA DEL ARCHIVO DE PROTOCOLO (Aquí reside el comportamiento de analista técnico)
 try:
     with open("SYSTEM_S2_PROTOCOLS.txt", "r", encoding="utf-8") as f:
         instrucciones_base = f.read()
 except FileNotFoundError:
-    instrucciones_base = (
-        "Eres el Oficial de Inteligencia S-2 de la unidad GUN4FUN. "
-        "PRECISIÓN ABSOLUTA REQUERIDA. NO INVENTES DATOS."
-    )
+    instrucciones_base = "Eres el Oficial S-2 de GUN4FUN. Analista técnico directo. PRECISIÓN ABSOLUTA."
 
 # --- 4. LÓGICA DE RESPUESTA EN CASCADA CON CONTEXTO REAL ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
-    # EXTRACCIÓN DE METADATOS DE TRANSMISIÓN (USUARIO Y TIEMPO)
+    # EXTRACCIÓN DE METADATOS (USUARIO Y TIEMPO)
     user = update.message.from_user
     username = f"@{user.username}" if user.username else user.first_name
     ahora = datetime.now()
     fecha_hora = ahora.strftime("%d/%m/%Y %H:%M:%S")
     
-    # Bloque de contexto situacional para la IA
     contexto_situacional = (
         f"\n--- METADATOS DE LA TRANSMISIÓN ---\n"
         f"FECHA Y HORA ACTUAL: {fecha_hora}\n"
@@ -95,11 +90,9 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     mensaje_usuario = update.message.text
-    
-    # Obtenemos los datos reales de Firebase
     contexto_real = obtener_datos_enciclopedia()
     
-    # Construcción del Prompt Maestro: Protocolos + Situación + Datos Firebase + Usuario
+    # El prompt ahora ordena a la IA ser un manual de instrucciones directo
     instrucciones_completas = f"{instrucciones_base}\n{contexto_situacional}\n{contexto_real}"
 
     # --- PLAN A: GROQ ---
@@ -110,7 +103,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 {"role": "system", "content": instrucciones_completas},
                 {"role": "user", "content": mensaje_usuario}
             ],
-            temperature=0.0, # TEMPERATURA 0: Blindaje contra alucinaciones
+            temperature=0.0,
             max_tokens=2048
         )
         respuesta = chat_completion.choices[0].message.content
@@ -166,7 +159,7 @@ def main():
         try:
             application = Application.builder().token(TELEGRAM_TOKEN).build()
             application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
-            print("Oficial S-2 (Protocolos SYSTEM S2) en línea. ¡RELOAD!")
+            print("Oficial S-2 (Analista Técnico) en línea. ¡RELOAD!")
             application.run_polling(drop_pending_updates=True)
         except Exception as e:
             print(f"Error en polling: {e}")
