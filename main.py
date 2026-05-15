@@ -3,7 +3,7 @@ import threading
 import time
 from flask import Flask
 from groq import Groq
-from mistralai.client import MistralClient as Mistral
+from mistralai import Mistral  # <-- Corregido para compatibilidad con mistralai==1.1.0
 from openai import OpenAI
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -27,6 +27,7 @@ DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
 
 # --- CONFIGURACIÓN DE INTELIGENCIA (TRIPLE NÚCLEO) ---
 client_groq = Groq(api_key=GROQ_API_KEY)
+# Ajustado para el nuevo SDK de Mistral
 client_mistral = Mistral(api_key=MISTRAL_API_KEY)
 client_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
 
@@ -74,6 +75,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if MISTRAL_API_KEY:
         try:
             print("🔄 Activando Plan B (Mistral)...")
+            # Ajustado a .chat.complete para el SDK moderno
             res_mistral = client_mistral.chat.complete(
                 model="mistral-small-latest",
                 messages=[
