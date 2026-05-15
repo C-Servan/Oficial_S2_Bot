@@ -3,3 +3,4 @@ flask
 groq
 mistralai==1.1.0
 openai
+firebase-admin
