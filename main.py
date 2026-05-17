@@ -107,7 +107,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     para parsear el texto o enlace del Comandante/Sargento en un objeto JSON multimedia limpio.
     """
     # Verificación estricta de Rangos Autorizados
-    autorizados = ["@carlosfservan", "@Gargarensis76", "@Gwyllion16"]
+    autorizados = ["@Carlosfservan", "@Gargarensis76", "@Gwyllion16"]
     if username not in autorizados:
         return f"Recluta, transmision denegada. No posees autorización de escritura en los Archivos de Inteligencia S-2."
 
