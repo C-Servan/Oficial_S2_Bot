@@ -71,7 +71,75 @@ try:
 except FileNotFoundError:
     instrucciones_base = "Eres el Oficial S-2 de GUN4FUN. Analista técnico directo. PRECISIÓN ABSOLUTA."
 
-# --- 4. LÓGICA DE RESPUESTA EN CASCADA CON CONTEXTO REAL ---
+# --- 4. SISTEMA TÁCTICO DE PROCESAMIENTO E INGESTA MULTIMEDIA ---
+def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
+    """
+    Intercepta y procesa la orden de guardado. Utiliza la potencia de procesamiento de la IA 
+    para parsear el texto o enlace del Comandante/Sargento en un objeto JSON multimedia limpio.
+    """
+    # Verificación estricta de Rangos Autorizados
+    autorizados = ["@carlosfservan", "@Gargarensis76", "@Gwyllion16"]
+    if username not in autorizados:
+        return f"Recluta, transmision denegada. No posees autorización de escritura en los Archivos de Inteligencia S-2."
+
+    # Prompt maestro de inyección estructural
+    prompt_parseo = (
+        "Actúa como el submódulo de indexación del Oficial S-2. Tu único objetivo es recibir una orden técnica "
+        "o enlace web suministrado por el Comandante o un Sargento, y estructurarlo en un formato JSON estricto.\n"
+        "Debes analizar el texto e identificar minuciosamente: todas las configuraciones, parámetros, imágenes de esquemas "
+        "o vídeos de tutoriales presentes.\n\n"
+        "Debes responder EXCLUSIVAMENTE con un objeto JSON válido que contenga la siguiente estructura:\n"
+        "{\n"
+        "  \"rama\": \"Indica una de estas cuatro opciones exactas: 1_Manuales_tecnicos, 2_Ecosistema_software, 3_Archivo_historico, 4_Protocolos_unidad\",\n"
+        "  \"subnodo\": \"Nombre del sistema, emulador o tema en minúsculas y sin espacios (ej: batocera, openfire, mame)\",\n"
+        "  \"datos\": {\n"
+        "    \"texto_guia\": \"Pasos detallados de configuración, parámetros explicados de archivos .conf, mapeos y calibración sin omitir nada.\",\n"
+        "    \"imagenes_esquema\": [\"Lista de URLs de diagramas, capturas de pantalla de menús o esquemas visuales encontrados, o un array vacío si no hay\"],\n"
+        "    \"videos_tutorial\": [\"Lista de URLs de vídeos explicativos de YouTube o referencias multimedia encontradas, o un array vacío si no hay\"]\n"
+        "  }\n"
+        "}\n"
+        "No agregues introducciones, no saludes, no agregues markdown extra de código. Solo el JSON puro."
+    )
+
+    try:
+        # Usamos Groq para procesar y estructurar el texto/enlace a guardar
+        parse_completion = client_groq.chat.completions.create(
+            model=MODELO_GROQ,
+            messages=[
+                {"role": "system", "content": prompt_parseo},
+                {"role": "user", "content": comando_texto}
+            ],
+            temperature=0.0
+        )
+        
+        resultado_raw = parse_completion.choices[0].message.content.strip()
+        
+        # Limpieza de posibles bloques de código agregados por el modelo
+        if resultado_raw.startswith("```json"):
+            resultado_raw = resultado_raw[7:]
+        if resultado_raw.endswith("```"):
+            resultado_raw = resultado_raw[:-3]
+        
+        objeto_datos = json.loads(resultado_raw.strip())
+        
+        rama = objeto_datos.get("rama")
+        subnodo = objeto_datos.get("subnodo")
+        payload = objeto_datos.get("datos")
+        payload["ultima_modificacion"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        payload["modificado_por"] = username
+
+        # Inyección directa en la Realtime Database de Firebase
+        ref = db.reference(f'Enciclopedia_S2/{rama}/{subnodo}')
+        ref.update(payload)
+        
+        # Confirmación adaptada al rango del operador
+        prefijo_rango = "Comandante" if username == "@carlosfservan" else "Sargento"
+        return f"{prefijo_rango}, datos técnicos procesados y guardados con éxito en 'Enciclopedia_S2/{rama}/{subnodo}'."
+        
+    except Exception as err:
+        return f"Error en el sistema de ingesta táctica: {str(err)}. Transmisión abortada."
+
+# --- 5. LÓGICA DE RESPUESTA EN CASCADA CON CONTEXTO REAL ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -82,6 +150,14 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ahora = datetime.now()
     fecha_hora = ahora.strftime("%d/%m/%Y %H:%M:%S")
     
+    mensaje_usuario = update.message.text
+
+    # INTERCEPTOR DE COMANDO /GUARDAR
+    if mensaje_usuario.strip().startswith("/guardar"):
+        resultado_guardado = ejecutar_ingesta_base_datos(username, mensaje_usuario)
+        await update.message.reply_text(f"{resultado_guardado}\n\nCambio y corto. ¡RELOAD!")
+        return
+
     contexto_situacional = (
         f"\n--- METADATOS DE LA TRANSMISIÓN ---\n"
         f"FECHA Y HORA ACTUAL: {fecha_hora}\n"
@@ -89,10 +165,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"------------------------------------\n"
     )
 
-    mensaje_usuario = update.message.text
     contexto_real = obtener_datos_enciclopedia()
-    
-    # El prompt ahora ordena a la IA ser un manual de instrucciones directo
     instrucciones_completas = f"{instrucciones_base}\n{contexto_situacional}\n{contexto_real}"
 
     # --- PLAN A: GROQ ---
@@ -147,7 +220,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("❌ INTERFERENCIA: Los canales de inteligencia están caídos.")
 
-# --- 5. LANZAMIENTO ---
+# --- 6. LANZAMIENTO ---
 def main():
     if not TELEGRAM_TOKEN:
         print("Falta TELEGRAM_TOKEN. Abortando.")
@@ -159,7 +232,7 @@ def main():
         try:
             application = Application.builder().token(TELEGRAM_TOKEN).build()
             application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
-            print("Oficial S-2 (Analista Técnico) en línea. ¡RELOAD!")
+            print("Oficial S-2 (Analista Técnico e Ingesta Activa) en línea. ¡RELOAD!")
             application.run_polling(drop_pending_updates=True)
         except Exception as e:
             print(f"Error en polling: {e}")
