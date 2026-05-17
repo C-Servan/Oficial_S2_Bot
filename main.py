@@ -23,13 +23,17 @@ firebase_creds_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
 if firebase_creds_json:
     try:
         creds_dict = json.loads(firebase_creds_json)
+        # Forzar explícitamente los Scopes de almacenamiento y base de datos para evitar el "Unauthorized request"
         cred = credentials.Certificate(creds_dict)
-        firebase_admin.initialize_app(cred, {
-            'databaseURL': 'https://gun4fun-ranking-default-rtdb.europe-west1.firebasedatabase.app/'
-        })
-        print("✅ Conexión a la Enciclopedia S-2 establecida.")
+        
+        # Evitar inicializaciones duplicadas si el proceso se reinicia en Render
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred, {
+                'databaseURL': 'https://gun4fun-ranking-default-rtdb.europe-west1.firebasedatabase.app/'
+            })
+        print("✅ Conexión blindada a la Enciclopedia S-2 establecida.")
     except Exception as e:
-        print(f"❌ Error al inicializar Firebase: {e}")
+        print(f"❌ Error crítico al inicializar Firebase: {e}")
 
 def obtener_datos_enciclopedia():
     """Recupera toda la sabiduría almacenada para dar contexto a la IA"""
@@ -106,9 +110,9 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     Intercepta y procesa la orden de guardado. Utiliza la potencia de procesamiento de la IA 
     para parsear el texto o enlace del Comandante/Sargento en un objeto JSON multimedia limpio.
     """
-    # Verificación estricta de Rangos Autorizados
-    autorizados = ["@Carlosfservan", "@Gargarensis76", "@Gwyllion16"]
-    if username not in autorizados:
+    # Verificación de Rangos Autorizados (Evitamos conflictos convirtiendo temporalmente a minúsculas)
+    autorizados = ["@carlosfservan", "@gargarensis76", "@gwyllion16"]
+    if username.lower() not in autorizados:
         return f"Recluta, transmision denegada. No posees autorización de escritura en los Archivos de Inteligencia S-2."
 
     # Si hay un enlace, el bot extrae la información técnica de la página web directamente
@@ -165,8 +169,8 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         ref = db.reference(f'Enciclopedia_S2/{rama}/{subnodo}')
         ref.update(payload)
         
-        # Confirmación adaptada al rango del operador
-        prefijo_rango = "Comandante" if username == "@carlosfservan" else "Sargento"
+        # Confirmación adaptada al rango del operador usando lower() para evitar fallos de strings
+        prefijo_rango = "Comandante" if username.lower() == "@carlosfservan" else "Sargento"
         return f"{prefijo_rango}, datos técnicos procesados, extraídos de la URL y guardados con éxito en 'Enciclopedia_S2/{rama}/{subnodo}'."
         
     except Exception as err:
@@ -251,7 +255,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e3:
             print(f"⚠️ PLAN C FALLIDO: {e3}")
 
-    await update.message.reply_text("❌ INTERFERENCIA: Los canales de inteligencia están caídos.")
+    await update.message.reply_text("❌ INTERFERENCIA: Los canales de intelligence están caídos.")
 
 # --- 6. LANZAMIENTO ---
 def main():
@@ -265,7 +269,7 @@ def main():
         try:
             application = Application.builder().token(TELEGRAM_TOKEN).build()
             
-            # CORRECCIÓN DE FILTRO: Eliminamos '~filters.COMMAND' para permitir el procesamiento de '/guardar' como texto plano.
+            # CORRECCIÓN DE FILTRO: Procesamiento de '/guardar' como texto plano activo.
             application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
             
             print("Oficial S-2 (Analista Técnico e Ingesta Activa) en línea. ¡RELOAD!")
