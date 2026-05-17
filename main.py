@@ -29,7 +29,7 @@ if firebase_creds_json:
         # Evitar inicializaciones duplicadas si el proceso se reinicia en Render
         if not firebase_admin._apps:
             firebase_admin.initialize_app(cred, {
-                'databaseURL': 'https://gun4fun-ranking-default-rtdb.europe-west1.firebasedatabase.app/'
+                'databaseURL': 'https://enciclopedia-oficial-s-2-default-rtdb.europe-west1.firebasedatabase.app/'
             })
         print("✅ Conexión blindada a la Enciclopedia S-2 establecida.")
     except Exception as e:
