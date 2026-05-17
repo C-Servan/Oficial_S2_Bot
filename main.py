@@ -2,6 +2,7 @@ import os
 import threading
 import time
 import json
+import re
 from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, db
@@ -11,6 +12,10 @@ from mistralai import Mistral
 from openai import OpenAI
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
+
+# Librerías nativas para extracción web segura y raspado de datos
+import urllib.request
+from bs4 import BeautifulSoup
 
 # --- 1. CONFIGURACIÓN FIREBASE (ENCICLOPEDIA S-2) ---
 firebase_creds_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
@@ -72,6 +77,30 @@ except FileNotFoundError:
     instrucciones_base = "Eres el Oficial S-2 de GUN4FUN. Analista técnico directo. PRECISIÓN ABSOLUTA."
 
 # --- 4. SISTEMA TÁCTICO DE PROCESAMIENTO E INGESTA MULTIMEDIA ---
+def extraer_contenido_url(texto: str) -> str:
+    """Detecta si hay un enlace en el comando, raspa el HTML de la web y extrae el texto limpio."""
+    urls = re.findall(r'(https?://[^\s|]+)', texto)
+    if not urls:
+        return ""
+    
+    url_objetivo = urls[0]
+    try:
+        req = urllib.request.Request(
+            url_objetivo, 
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html = response.read()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Limpieza de elementos irrelevantes de la interfaz web
+            for element in soup(["script", "style", "nav", "footer", "header", "aside"]):
+                element.decompose()
+                
+            return f"\n[CONTENIDO EXTRAÍDO EN TIEMPO REAL DESDE LA URL: {url_objetivo}]\n{soup.get_text(separator=' ', strip=True)}"
+    except Exception as e:
+        return f"\n[ERROR TÉCNICO AL ACCEDER A LA URL {url_objetivo}: {str(e)}]"
+
 def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     """
     Intercepta y procesa la orden de guardado. Utiliza la potencia de procesamiento de la IA 
@@ -82,20 +111,24 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     if username not in autorizados:
         return f"Recluta, transmision denegada. No posees autorización de escritura en los Archivos de Inteligencia S-2."
 
+    # Si hay un enlace, el bot extrae la información técnica de la página web directamente
+    contenido_web = extraer_contenido_url(comando_texto)
+    datos_completos_para_ia = f"Orden original del usuario:\n{comando_texto}\n{contenido_web}"
+
     # Prompt maestro de inyección estructural
     prompt_parseo = (
         "Actúa como el submódulo de indexación del Oficial S-2. Tu único objetivo es recibir una orden técnica "
-        "o enlace web suministrado por el Comandante o un Sargento, y estructurarlo en un formato JSON estricto.\n"
-        "Debes analizar el texto e identificar minuciosamente: todas las configuraciones, parámetros, imágenes de esquemas "
-        "o vídeos de tutoriales presentes.\n\n"
+        "junto con el contenido extraído de un enlace web suministrado por el Comandante o un Sargento, y estructurarlo en un formato JSON estricto.\n"
+        "Debes analizar minuciosamente el texto e identificar: todas las configuraciones, parámetros del sistema, pasos detallados, e indexar todas las URLs de imágenes, esquemas "
+        "o vídeos de YouTube que se encuentren explícitos en el texto.\n\n"
         "Debes responder EXCLUSIVAMENTE con un objeto JSON válido que contenga la siguiente estructura:\n"
         "{\n"
         "  \"rama\": \"Indica una de estas cuatro opciones exactas: 1_Manuales_tecnicos, 2_Ecosistema_software, 3_Archivo_historico, 4_Protocolos_unidad\",\n"
         "  \"subnodo\": \"Nombre del sistema, emulador o tema en minúsculas y sin espacios (ej: batocera, openfire, mame)\",\n"
         "  \"datos\": {\n"
         "    \"texto_guia\": \"Pasos detallados de configuración, parámetros explicados de archivos .conf, mapeos y calibración sin omitir nada.\",\n"
-        "    \"imagenes_esquema\": [\"Lista de URLs de diagramas, capturas de pantalla de menús o esquemas visuales encontrados, o un array vacío si no hay\"],\n"
-        "    \"videos_tutorial\": [\"Lista de URLs de vídeos explicativos de YouTube o referencias multimedia encontradas, o un array vacío si no hay\"]\n"
+        "    \"imagenes_esquema\": [\"Lista de URLs completas de diagramas o capturas encontradas en el texto, o un array vacío si no hay\"],\n"
+        "    \"videos_tutorial\": [\"Lista de URLs completas de vídeos de YouTube o referencias multimedia encontradas, o un array vacío si no hay\"]\n"
         "  }\n"
         "}\n"
         "No agregues introducciones, no saludes, no agregues markdown extra de código. Solo el JSON puro."
@@ -107,7 +140,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
             model=MODELO_GROQ,
             messages=[
                 {"role": "system", "content": prompt_parseo},
-                {"role": "user", "content": comando_texto}
+                {"role": "user", "content": datos_completos_para_ia}
             ],
             temperature=0.0
         )
@@ -134,7 +167,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         
         # Confirmación adaptada al rango del operador
         prefijo_rango = "Comandante" if username == "@carlosfservan" else "Sargento"
-        return f"{prefijo_rango}, datos técnicos procesados y guardados con éxito en 'Enciclopedia_S2/{rama}/{subnodo}'."
+        return f"{prefijo_rango}, datos técnicos procesados, extraídos de la URL y guardados con éxito en 'Enciclopedia_S2/{rama}/{subnodo}'."
         
     except Exception as err:
         return f"Error en el sistema de ingesta táctica: {str(err)}. Transmisión abortada."
@@ -231,7 +264,10 @@ def main():
     while True:
         try:
             application = Application.builder().token(TELEGRAM_TOKEN).build()
-            application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje))
+            
+            # CORRECCIÓN DE FILTRO: Eliminamos '~filters.COMMAND' para permitir el procesamiento de '/guardar' como texto plano.
+            application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
+            
             print("Oficial S-2 (Analista Técnico e Ingesta Activa) en línea. ¡RELOAD!")
             application.run_polling(drop_pending_updates=True)
         except Exception as e:
