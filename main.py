@@ -1,119 +1,43 @@
+# main.py
 import os
 import threading
 import time
 import json
 import re
 from datetime import datetime
-import firebase_admin
-from firebase_admin import credentials, db
 from flask import Flask
-from groq import Groq
-from mistralai import Mistral
-from openai import OpenAI
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application, 
+    MessageHandler, 
+    CommandHandler, 
+    CallbackQueryHandler, 
+    ConversationHandler, 
+    filters, 
+    ContextTypes
+)
+
+# Inyección de módulos tácticos propios
+import database
+import ai_cascade
+import menus
 
 # Librerías nativas para extracción web segura y raspado de datos
 import urllib.request
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
-# --- 1. CONFIGURACIÓN FIREBASE (ENCICLOPEDIA S-2) ---
-firebase_creds_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
-
-if firebase_creds_json:
-    try:
-        creds_dict = json.loads(firebase_creds_json)
-        cred = credentials.Certificate(creds_dict)
-        
-        if not firebase_admin._apps:
-            firebase_admin.initialize_app(cred, {
-                'databaseURL': 'https://enciclopedia-oficial-s-2-default-rtdb.europe-west1.firebasedatabase.app/'
-            })
-        print("✅ Conexión blindada a la Enciclopedia S-2 establecida.")
-    except Exception as e:
-        print(f"❌ Error crítico al inicializar Firebase: {e}")
-
-def obtener_contexto_inteligente(mensaje_usuario: str) -> tuple:
-    """
-    Busca de forma ultra-ligera en Firebase usando shallow=True.
-    Retorna una tupla: (contexto_str, coincidencia_detectada_bool, mapa_completo_ramas)
-    """
-    try:
-        ref_raiz = db.reference('Enciclopedia_S2')
-        ramas_claves = ref_raiz.get(shallow=True)
-        
-        if not ramas_claves:
-            return ("No hay datos registrados en la enciclopedia aún.", False, {})
-        
-        mensaje_min = mensaje_usuario.lower()
-        mapa_conocimiento = {}
-        subnodo_objetivo = None
-        rama_objetivo = None
-
-        # Fase 1: Mapear la estructura superficial de subnodos de forma ultra-rápida
-        for rama in ramas_claves.keys():
-            ref_subnodos = db.reference(f'Enciclopedia_S2/{rama}')
-            subnodos_claves = ref_subnodos.get(shallow=True)
-            
-            if subnodos_claves and isinstance(subnodos_claves, dict):
-                lista_subnodos = list(subnodos_claves.keys())
-                mapa_conocimiento[rama] = lista_subnodos
-                
-                for subnodo in lista_subnodos:
-                    if subnodo.lower() in mensaje_min or subnodo.replace("_", "") in mensaje_min:
-                        subnodo_objetivo = subnodo
-                        rama_objetivo = rama
-            else:
-                mapa_conocimiento[rama] = []
-
-        # Fase 2: Descargar de Firebase ÚNICAMENTE el subnodo solicitado si hay coincidencia
-        if subnodo_objetivo and rama_objetivo:
-            ref_especifica = db.reference(f'Enciclopedia_S2/{rama_objetivo}/{subnodo_objetivo}')
-            datos_subnodo = ref_especifica.get()
-            
-            contexto = "\n--- DATOS REALES EXTRAÍDOS DE LA ENCICLOPEDIA (COINCIDENCIA DETECTADA) ---\n"
-            contexto += f"RAMA: {rama_objetivo} | SUBNODO: {subnodo_objetivo}\n"
-            contexto += json.dumps(datos_subnodo, indent=2, ensure_ascii=False)
-            contexto += "\n--- FIN DE LOS DATOS REALES RECUPERADOS ---\n"
-            return (contexto, True, mapa_conocimiento)
-            
-        # Si no hay coincidencia, devolvemos falso y el mapa para armar el menú/encuesta interactiva
-        return ("", False, mapa_conocimiento)
-
-    except Exception as e:
-        print(f"Error crítico en filtro analítico de contexto: {e}")
-        return ("Error limitador al recuperar contexto real por saturación.", False, {})
-
-# --- 2. CONFIGURACIÓN DEL SERVIDOR WEB ---
+# --- 1. CONFIGURACIÓN DEL SERVIDOR WEB ---
 app = Flask(__name__)
 @app.route('/')
 def health_check():
-    return "Oficial S-2 Operativo (Protocolos System S2 Activos)", 200
+    return "Oficial S-2 Operativo (Protocolos System S2 Modulares Activos)", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- 3. CONFIGURACIÓN DE SEGURIDAD Y CLIENTES IA ---
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
-MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY')
-DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
-
-client_groq = Groq(api_key=GROQ_API_KEY)
-client_mistral = Mistral(api_key=MISTRAL_API_KEY)
-client_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
-
-MODELO_GROQ = "llama-3.3-70b-versatile"
-
-try:
-    with open("SYSTEM_S2_PROTOCOLS.txt", "r", encoding="utf-8") as f:
-        instrucciones_base = f.read()
-except FileNotFoundError:
-    instrucciones_base = "Eres el Oficial S-2 de GUN4FUN. Analista técnico directo. PRECISIÓN ABSOLUTA."
-
-# --- 4. SISTEMA TÁCTICO DE PROCESAMIENTO E INGESTA MULTIMEDIA ---
+# --- 2. SISTEMA TÁCTICO DE INGESTA MULTIMEDIA POR OLEADAS ---
 def extraer_contenido_url(texto: str) -> str:
     """Raspa el HTML de la web extrayendo todo el contenido de texto, imágenes y vídeos reales."""
     urls = re.findall(r'(https?://[^\s|]+)', texto)
@@ -130,7 +54,6 @@ def extraer_contenido_url(texto: str) -> str:
             html = response.read()
             soup = BeautifulSoup(html, 'html.parser')
             
-            # 1. Extracción y normalización de imágenes reales
             imagenes_encontradas = []
             for img in soup.find_all('img'):
                 src = img.get('src')
@@ -139,7 +62,6 @@ def extraer_contenido_url(texto: str) -> str:
                     if url_completa not in imagenes_encontradas:
                         imagenes_encontradas.append(url_completa)
             
-            # 2. Extracción de vídeos (YouTube)
             videos_encontrados = []
             for a in soup.find_all('a', href=True):
                 href = a['href']
@@ -148,7 +70,6 @@ def extraer_contenido_url(texto: str) -> str:
                     if url_video not in videos_encontrados:
                         videos_encontrados.append(url_video)
 
-            # Limpieza de elementos de interfaz de la web
             for element in soup(["script", "style", "nav", "footer", "header", "aside"]):
                 element.decompose()
                 
@@ -163,45 +84,6 @@ def extraer_contenido_url(texto: str) -> str:
             return reporte_web
     except Exception as e:
         return f"\n[ERROR TÉCNICO AL ACCEDER A LA URL {url_objetivo}: {str(e)}]"
-
-def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
-    """Ejecuta una solicitud de IA en cascada blindada con límites de salida ampliados."""
-    try:
-        completion = client_groq.chat.completions.create(
-            model=MODELO_GROQ,
-            messages=[{"role": "system", "content": prompt_sistema}, {"role": "user", "content": prompt_usuario}],
-            temperature=0.0,
-            max_tokens=4096
-        )
-        return completion.choices[0].message.content, "Canal Alpha - Groq"
-    except Exception as e:
-        print(f"⚠️ Ingesta Plan A fallida: {e}")
-
-    if MISTRAL_API_KEY:
-        try:
-            completion = client_mistral.chat.complete(
-                model="mistral-small-latest",
-                messages=[{"role": "system", "content": prompt_sistema}, {"role": "user", "content": prompt_usuario}],
-                temperature=0.0,
-                max_tokens=4096
-            )
-            return completion.choices[0].message.content, "Canal Bravo - Mistral"
-        except Exception as e2:
-            print(f"⚠️ Ingesta Plan B fallida: {e2}")
-
-    if DEEPSEEK_API_KEY:
-        try:
-            completion = client_deepseek.chat.completions.create(
-                model="deepseek-chat",
-                messages=[{"role": "system", "content": prompt_sistema}, {"role": "user", "content": prompt_usuario}],
-                temperature=0.0,
-                max_tokens=4096
-            )
-            return completion.choices[0].message.content, "Canal Charlie - DeepSeek"
-        except Exception as e3:
-            print(f"⚠️ Ingesta Plan C fallida: {e3}")
-
-    raise Exception("Todos los canales de procesamiento de IA se encuentran fuera de servicio debido a saturación de tokens.")
 
 def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     """Descarga la información existente, genera un índice dinámico y procesa la web por secciones secuenciales."""
@@ -219,12 +101,13 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
 
     datos_existentes = {}
     try:
+        from firebase_admin import db
         ref_existente = db.reference(f'Enciclopedia_S2/{rama_detectada}/{subnodo_detectado}')
         nodo_actual = ref_existente.get()
         if nodo_actual:
             datos_existentes = nodo_actual
     except Exception as e:
-        print(f"Aviso: No se pudo leer el histórico (procesando como nodo nuevo): {e}")
+        print(f"Aviso: No se pudo leer el histórico: {e}")
 
     contenido_web = extraer_contenido_url(comando_texto)
     if not contenido_web or "[ERROR TÉCNICO" in contenido_web:
@@ -234,15 +117,14 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         "Actúas como el Ingeniero de Reconocimiento del Oficial S-2. Tu único objetivo es analizar la información textual extraída de una web "
         "y estructurar un ÍNDICE DINÁMICO de categorías estandarizadas basadas estrictamente en la materia tratada en el documento.\n\n"
         "REGLAS OBLIGATORIAS:\n"
-        "1. Identifica entre 3 y 7 categorías lógicas que agrupen perfectamente todo el contenido expuesto en la web (ejemplos válidos: Manual_Instalacion, Calibracion_Hardware, FAQ, Resolucion_Problemas, Requisitos_Sistema, Comandos_Consola, etc).\n"
+        "1. Identifica entre 3 y 7 categorías lógicas.\n"
         "2. Formatea las categorías usando CamelCase o guiones bajos sin espacios.\n"
-        "3. Responde ÚNICAMENTE con la lista de categorías separadas por comas, sin introducciones, saludos, ni bloques de código Markdown.\n\n"
-        "Ejemplo de respuesta esperada:\n"
-        "Manual_Instalacion, Calibracion_Hardware, FAQ, Resolucion_Problemas"
+        "3. Responde ÚNICAMENTE con la lista de categorías separadas por comas.\n\n"
+        "Ejemplo de respuesta:\nManual_Instalacion, Calibracion_Hardware, FAQ"
     )
 
     try:
-        indice_raw, canal_indexador = ejecutar_ia_con_cascada(prompt_indexador, contenido_web)
+        indice_raw, canal_indexador = ai_cascade.ejecutar_ia_con_cascada(prompt_indexador, contenido_web)
         indice_raw = re.sub(r'[`\s\n]', '', indice_raw)
         categorias = [cat.strip() for cat in indice_raw.split(",") if cat.strip()]
         if not categorias:
@@ -258,34 +140,29 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     nuevas_img = [u for u in urls_en_texto if any(ext in u.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])]
     nuevos_vid = [u for u in urls_en_texto if 'youtube.com' in u.lower() or 'youtu.be' in u.lower()]
 
-    for categoria in categorias:
-        texto_historico_categoria = datos_existentes.get(categoria, "No hay registros preexistentes de esta categoría.")
-        
+    for category in categorias:
+        texto_historico_categoria = datos_existentes.get(category, "No hay registros preexistentes de esta categoría.")
         datos_oleada_ia = (
-            f"=== CATEGORÍA A PROCESAR EN ESTA OLEADA ===\n{categoria}\n\n"
-            f"=== HISTÓRICO ALMACENADO EN FIREBASE PARA ESTA CATEGORÍA ===\n{texto_historico_categoria}\n\n"
+            f"=== CATEGORÍA A PROCESAR ===\n{category}\n\n"
+            f"=== HISTÓRICO ALMACENADO ===\n{texto_historico_categoria}\n\n"
             f"=== CONTENIDO COMPLETO DE LA NUEVA WEB ===\n{contenido_web}"
         )
 
         prompt_oleada = (
-            f"Actúas como el Especialista de Ingesta Táctica S-2 para la sección '{categoria}'. Tu misión es extraer de manera quirúrgica "
-            f"toda la información de la nueva web que corresponda EXCLUSIVAMENTE a la temática de la categoría '{categoria}' y fusionarla con el histórico.\n\n"
-            f"INSTRUCCIONES DE ACCIÓN:\n"
-            f"1. Haz un 'merge' inteligente: Redacta un manual unificado, extenso, técnico, jerarquizado y más detallado combinando el conocimiento histórico con los nuevos datos entrantes.\n"
-            f"2. Si la web entrante no aporta nada nuevo o útil para la sección '{categoria}', mantén íntegro e intacto el texto histórico que se te ha provisto.\n"
-            f"3. No inventes configuraciones, mantén la precisión analítica absoluta.\n"
-            f"4. Responde ÚNICAMENTE con el desarrollo de texto de la sección unificada, sin etiquetas del formato anterior, sin bloques de código ```json o ```markdown, and sin comentarios editoriales externos."
+            f"Actúas como el Especialista de Ingesta Táctica S-2 para la sección '{category}'. Tu misión es extraer de manera quirúrgica "
+            f"toda la información de la nueva web que corresponda EXCLUSIVAMENTE a la temática de la categoría '{category}' y fusionarla con el histórico.\n\n"
+            f"Responde ÚNICAMENTE con el desarrollo de texto de la sección unificada, sin etiquetas del formato anterior, sin bloques de código, ni comentarios externos."
         )
 
         try:
-            texto_fusionado, canal_oleada = ejecutar_ia_con_cascada(prompt_oleada, datos_oleada_ia)
-            payload_acumulado[categoria] = texto_fusionado.strip()
+            texto_fusionado, canal_oleada = ai_cascade.ejecutar_ia_con_cascada(prompt_oleada, datos_oleada_ia)
+            payload_acumulado[category] = texto_fusionado.strip()
             if canal_oleada not in canales_utilizados:
                 canales_utilizados.append(canal_oleada)
             time.sleep(0.5)
         except Exception as err_oleada:
-            print(f"Error procesando la oleada {categoria}: {err_oleada}")
-            payload_acumulado[categoria] = texto_historico_categoria
+            print(f"Error procesando la oleada {category}: {err_oleada}")
+            payload_acumulado[category] = texto_historico_categoria
 
     img_historicas = datos_existentes.get("imagenes_esquema", [])
     vid_historicos = datos_existentes.get("videos_tutorial", [])
@@ -299,6 +176,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     payload_final["modificado_por"] = username
 
     try:
+        from firebase_admin import db
         ref = db.reference(f'Enciclopedia_S2/{rama_detectada}/{subnodo_detectado}')
         ref.update(payload_final)
         
@@ -306,14 +184,14 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         canales_str = ", ".join(canales_utilizados)
         return (
             f"[{canales_str}]\n\n"
-            f"¡Fase 2 Completada con éxito, {prefijo_rango}! El sistema ha mapeado dinámicamente un índice de {len(categorias)} categorías "
-            f"({', '.join(categorias)}). La información ha sido procesada por oleadas y fusionada de manera incremental en "
-            f"'{rama_detectada}/{subnodo_detectado}' sin pérdidas sintácticas ni saturación de memoria."
+            f"¡Fase 2 Completada con éxito, {prefijo_rango}! El sistema ha mapeado dinámicamente un índice de {len(categorias)} categorías. "
+            f"La información ha sido procesada por oleadas y fusionada de manera incremental en "
+            f"'{rama_detectada}/{subnodo_detectado}' sin pérdidas sintácticas ni saturación."
         )
     except Exception as err:
-        return f"Error crítico al inyectar el payload consolidado en Firebase: {str(err)}. Transmisión abortada."
+        return f"Error crítico al inyectar el payload consolidado en Firebase: {str(err)}."
 
-# --- 5. LÓGICA DE RESPUESTA EN CASCADA CON CONTEXTO REAL ---
+# --- 3. PROCESADOR PRINCIPAL DE MENSAJES E INTEGRACIÓN DE IA ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -332,174 +210,85 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mensaje_usuario.lower() in ["/estado", "estado", "¿con qué ia estás trabajando?", "con que ia estas trabajando"]:
         reporte_estado = (
             "📊 **INFORME DE ESTADO OPERATIVO - OFICIAL S-2**\n"
-            f"• Canal Alpha (Groq - {MODELO_GROQ}): {'🟢 ONLINE' if GROQ_API_KEY else '🔴 OFFLINE'}\n"
-            f"• Canal Bravo (Mistral - Small): {'🟢 ONLINE' if MISTRAL_API_KEY else '🔴 OFFLINE'}\n"
-            f"• Canal Charlie (DeepSeek - Chat): {'🟢 ONLINE' if DEEPSEEK_API_KEY else '🔴 OFFLINE'}\n\n"
+            f"• Canal Alpha (Groq - {ai_cascade.MODELO_GROQ}): {'🟢 ONLINE' if ai_cascade.GROQ_API_KEY else '🔴 OFFLINE'}\n"
+            f"• Canal Bravo (Mistral - Small): {'🟢 ONLINE' if ai_cascade.MISTRAL_API_KEY else '🔴 OFFLINE'}\n"
+            f"• Canal Charlie (DeepSeek - Chat): {'🟢 ONLINE' if ai_cascade.DEEPSEEK_API_KEY else '🔴 OFFLINE'}\n\n"
             "**Prioridad de Enrutamiento:** Cascada Táctica (Alpha ➡️ Bravo ➡️ Charlie).\n"
             "El sistema responderá utilizando el canal prioritario disponible."
         )
         await update.message.reply_text(reporte_estado, parse_mode="Markdown")
         return
 
-    # ==========================================
-    # SISTEMA INTERACTIVO TÁCTICO: ENCUESTA DEL ÍNDICE
-    # ==========================================
-    contexto_real, coincidencia, mapa_completo = obtener_contexto_inteligente(mensaje_usuario)
-    listado_ramas = sorted(list(mapa_completo.keys())) if mapa_completo else []
-
-    # Inicializar estado en la sesión temporal si no existe
-    if 'encuesta_paso' not in context.user_data:
-        context.user_data['encuesta_paso'] = None
-
-    # PASO INTERMEDIO: El usuario seleccionó una Rama y ahora elige el Subnodo
-    if context.user_data['encuesta_paso'] == 'esperando_subnodo':
-        rama_seleccionada = context.user_data.get('rama_seleccionada')
-        subnodos_disponibles = mapa_completo.get(rama_seleccionada, [])
+    # ANALIZADOR DE CONTEXTO REAL EN FIREBASE
+    # Si venimos del desvío de los botones, forzamos el subnodo elegido
+    if "forzar_subnodo" in context.user_data:
+        subnodo_elegido = context.user_data.pop("forzar_subnodo")
+        from firebase_admin import db
+        mapa = database.obtener_mapa_superficial()
+        rama_objetivo = next((r for r, subs in mapa.items() if subnodo_elegido in subs), "1_Manuales_tecnicos")
         
-        try:
-            indice_elegido = int(mensaje_usuario) - 1
-            if 0 <= indice_elegido < len(subnodos_disponibles):
-                subnodo_elegido = subnodos_disponibles[indice_elegido]
-                
-                # Reseteamos estado y forzamos la consulta directa del nodo seleccionado
-                context.user_data['encuesta_paso'] = None
-                mensaje_usuario = subnodo_elegido  # Forzamos re-evaluación
-                contexto_real, coincidencia, _ = obtener_contexto_inteligente(mensaje_usuario)
-            else:
-                await update.message.reply_text(f"⚠️ Selección inválida. Por favor, introduce un número del 1 al {len(subnodos_disponibles)}.")
-                return
-        except ValueError:
-            # Si escribe el nombre directamente en vez del número
-            if mensaje_usuario.lower() in [s.lower() for s in subnodos_disponibles]:
-                context.user_data['encuesta_paso'] = None
-                contexto_real, coincidencia, _ = obtener_contexto_inteligente(mensaje_usuario)
-            else:
-                await update.message.reply_text("Envíe el número correspondiente de la lista militar o escriba cancelar.")
-                return
-
-    # PASO INICIAL: El usuario elige qué Rama quiere explorar
-    elif context.user_data['encuesta_paso'] == 'esperando_rama':
-        if mensaje_usuario.lower() in ['cancelar', 'salir', '/start']:
-            context.user_data['encuesta_paso'] = None
-            await update.message.reply_text("Protocolo de navegación cancelado. Volviendo a modo de guardia.")
-            return
-            
-        try:
-            indice_elegido = int(mensaje_usuario) - 1
-            if 0 <= indice_elegido < len(listado_ramas):
-                rama_seleccionada = listado_ramas[indice_elegido]
-                subnodos = mapa_completo.get(rama_seleccionada, [])
-                
-                if not subnodos:
-                    await update.message.reply_text(f"La sección *{rama_seleccionada}* está vacía actualmente. Busque en otra división.")
-                    context.user_data['encuesta_paso'] = None
-                    return
-                
-                context.user_data['rama_seleccionada'] = rama_seleccionada
-                context.user_data['encuesta_paso'] = 'esperando_subnodo'
-                
-                menu_subnodos = f"📂 **DIVISIÓN SELECCIONADA:** {rama_seleccionada}\n\nSeleccione el número del archivo que desea consultar:\n"
-                for i, sub in enumerate(subnodos, 1):
-                    menu_subnodos += f"**[{i}]** {sub.replace('_', ' ').title()}\n"
-                
-                await update.message.reply_text(menu_subnodos, parse_mode="Markdown")
-                return
-            else:
-                await update.message.reply_text(f"⚠️ Selección fuera de rango. Introduzca un número entre 1 y {len(listado_ramas)}.")
-                return
-        except ValueError:
-            await update.message.reply_text("Por favor, responda con el número asignado a la sección.")
-            return
-
-    # ACTIVADOR DE LA ENCUESTA (Si no hay coincidencia exacta o pide ayuda de forma explícita)
-    if not coincidencia or mensaje_usuario.lower() in ["ayuda", "/ayuda", "ayudame", "menú", "menu"]:
-        context.user_data['encuesta_paso'] = 'esperando_rama'
+        ref_especifica = db.reference(f'Enciclopedia_S2/{rama_objetivo}/{subnodo_elegido}')
+        datos_nodo = ref_especifica.get()
         
-        menu_principal = (
-            f"📋 **ENCUESTA DEL ÍNDICE DE INTELIGENCIA S-2**\n\n"
-            f"Comandante, el término que busca no consta en los registros de acceso rápido o ha solicitado el mapeo general.\n"
-            f"Por favor, elija qué división de la base de datos desea abrir (responda solo con el **NÚMERO**):\n\n"
-        )
-        for i, rama in enumerate(listado_ramas, 1):
-            menu_principal += f"**[{i}]** {rama.replace('_', ' ').title()}\n"
-            
-        menu_principal += "\n💡 *O responda 'cancelar' en cualquier momento para salir.*"
-        await update.message.reply_text(menu_principal, parse_mode="Markdown")
-        return  # <-- PARCHE CRÍTICO: Detiene la ejecución aquí para que NO salte a las IAs inferiores.
+        contexto_real = f"\n--- DATOS REALES EXTRAÍDOS DE LA ENCICLOPEDIA ---\nRAMA: {rama_objetivo} | SUBNODO: {subnodo_elegido}\n{json.dumps(datos_nodo, indent=2, ensure_ascii=False)}\n"
+        coincidencia = True
+    else:
+        # Búsqueda tradicional en texto libre
+        datos_nodo, rama_obj, sub_obj = database.buscar_coincidencia_exacta(mensaje_usuario)
+        if datos_nodo:
+            contexto_real = f"\n--- DATOS REALES EXTRAÍDOS DE LA ENCICLOPEDIA ---\nRAMA: {rama_obj} | SUBNODO: {sub_obj}\n{json.dumps(datos_nodo, indent=2, ensure_ascii=False)}\n"
+            coincidencia = True
+        else:
+            contexto_real, coincidencia = "", False
 
-    # ==========================================
-    # FLUJO NORMAL CON IA SI COINCIDE EL ARCHIVO
-    # ==========================================
-    contexto_situacional = (
-        f"\n--- METADATOS DE LA TRANSMISIÓN ---\n"
-        f"FECHA Y HORA ACTUAL: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
-        f"IDENTIDAD DEL REMITENTE: {username}\n"
-        f"------------------------------------\n"
-    )
+    # SI NO HAY COINCIDENCIA (Ej: "Dame información sobre Openfire"), DISPARAMOS LA ENCUESTA INTERACTIVA
+    if not coincidencia or mensaje_usuario.lower() in ["ayuda", "/ayuda", "menu", "menú"]:
+        # Iniciamos el ConversationHandler enviándole el control a menus.py
+        await menus.activar_encuesta_indice(update, context, mensaje_usuario)
+        return ConversationHandler.END
 
-    instrucciones_completas = f"{instrucciones_base}\n{contexto_situacional}\n{contexto_real}"
-
-    # --- PLAN A: GROQ ---
+    # FLUJO SEGURO DE IA EN CASCADA
     try:
-        chat_completion = client_groq.chat.completions.create(
-            model=MODELO_GROQ,
-            messages=[{"role": "system", "content": instrucciones_completas}, {"role": "user", "content": mensaje_usuario}],
-            temperature=0.0,
-            max_tokens=2048
-        )
-        respuesta = chat_completion.choices[0].message.content
-        if respuesta:
-            await update.message.reply_text(f"[Canal Alpha - Groq]\n\n{respuesta}")
-            return
+        respuesta, canal = ai_cascade.procesar_consulta_directa(mensaje_usuario, contexto_real, username)
+        await update.message.reply_text(f"[{canal}]\n\n{respuesta}")
     except Exception as e:
-        print(f"⚠️ PLAN A FALLIDO (Consulta): {e}")
+        print(f"❌ Error crítico en cascada de IA: {e}")
+        await update.message.reply_text("❌ INTERFERENCIA: Todos los canales de inteligencia están caídos debido a desbordamiento.")
 
-    # --- PLAN B: MISTRAL ---
-    if MISTRAL_API_KEY:
-        try:
-            res_mistral = client_mistral.chat.complete(
-                model="mistral-small-latest",
-                messages=[{"role": "system", "content": instrucciones_completas}, {"role": "user", "content": mensaje_usuario}],
-                temperature=0.0,
-                max_tokens=2048
-            )
-            await update.message.reply_text(f"[Canal Bravo - Mistral]\n\n{res_mistral.choices[0].message.content}")
-            return
-        except Exception as e2:
-            print(f"⚠️ PLAN B FALLIDO (Consulta): {e2}")
-
-    # --- PLAN C: DEEPSEEK ---
-    if DEEPSEEK_API_KEY:
-        try:
-            res_ds = client_deepseek.chat.completions.create(
-                model="deepseek-chat",
-                messages=[{"role": "system", "content": instrucciones_completas}, {"role": "user", "content": mensaje_usuario}],
-                temperature=0.0,
-                max_tokens=2048
-            )
-            await update.message.reply_text(f"[Canal Charlie - DeepSeek]\n\n{res_ds.choices[0].message.content}")
-            return
-        except Exception as e3:
-            print(f"⚠️ PLAN C FALLIDO (Consulta): {e3}")
-
-    await update.message.reply_text("❌ INTERFERENCIA: Todos los canales de inteligencia están caídos debido a desbordamiento.")
-
-# --- 6. LANZAMIENTO ---
+# --- 4. LANZAMIENTO Y CONFIGURACIÓN DEL BOT ---
 def main():
-    if not TELEGRAM_TOKEN:
-        print("Falta TELEGRAM_TOKEN. Abortando.")
+    if not ai_cascade.TELEGRAM_TOKEN:
+        print("Falta TELEGRAM_TOKEN. Abortando misión.")
         return
 
+    # Hilo para el servidor web de Render/Railway
     threading.Thread(target=run_flask, daemon=True).start()
 
     while True:
         try:
-            application = Application.builder().token(TELEGRAM_TOKEN).build()
+            application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
+            
+            # CONFIGURACIÓN DEL CONTROLADOR DE CONVERSACIONES NATIVO (FSM)
+            manejador_encuesta = ConversationHandler(
+                entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje)],
+                states={
+                    menus.ESTADO_RAMA: [CallbackQueryHandler(menus.procesar_seleccion_rama)],
+                    menus.ESTADO_SUBNODO: [CallbackQueryHandler(menus.procesar_seleccion_subnodo)]
+                },
+                fallbacks=[CommandHandler('cancelar', menus.cancelar_navegacion)],
+                allow_reentry=True
+            )
+            
+            # Registramos el manejador maestro
+            application.add_handler(manejador_encuesta)
+            
+            # Manejador de respaldo para comandos directos
             application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
-            print("Oficial S-2 (Analista Técnico e Ingesta Activa) en línea. ¡RELOAD!")
+
+            print("🚀 Oficial S-2 modularizado y blindado en línea. ¡RELOAD!")
             application.run_polling(drop_pending_updates=True)
         except Exception as e:
-            print(f"Error en polling: {e}")
+            print(f"Error en polling de Telegram: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":
