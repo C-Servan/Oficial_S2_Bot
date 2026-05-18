@@ -187,19 +187,19 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         subnodo_detectado = partes[1].strip().lower().replace(" ", "")
 
     # Descarga analítica del estado actual del subnodo en Firebase
-    datos_existentes_json = "{}"
+    datos_existentes = {}
     try:
         ref_existente = db.reference(f'Enciclopedia_S2/{rama_detectada}/{subnodo_detectado}')
         nodo_actual = ref_existente.get()
         if nodo_actual:
-            datos_existentes_json = json.dumps(nodo_actual, ensure_ascii=False)
+            datos_existentes = nodo_actual
     except Exception as e:
         print(f"Aviso: No se pudo leer el histórico (procesando como nodo nuevo): {e}")
 
     contenido_web = extraer_contenido_url(comando_texto)
     
     datos_completos_para_ia = (
-        f"--- CONOCIMIENTO HISTÓRICO ALMACENADO EN FIREBASE ---\n{datos_existentes_json}\n\n"
+        f"--- CONOCIMIENTO HISTÓRICO ALMACENADO EN FIREBASE ---\n{json.dumps(datos_existentes, ensure_ascii=False)}\n\n"
         f"--- NUEVA INFORMACIÓN ENTRANTE ENVIADA POR OPERADOR ---\n{comando_texto}\n{contenido_web}"
     )
 
@@ -208,7 +208,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         "y los arrays multimedia provistos, y fusionarlos de manera incremental con el conocimiento histórico ya existente sin destruir nada.\n\n"
         "REGLAS ESTRATÉGICAS DE FUSIÓN (MERGE):\n"
         "1. Mantén la 'rama' y el 'subnodo' consistentes con el destino indicado.\n"
-        "2. Estructura el objeto 'datos' utilizando de manera fija y exclusiva estas cinco secciones estructurales:\n"
+        "2. Organiza la información utilizando de manera fija estas cinco secciones estructurales:\n"
         "   - 'Descripcion': Explicación completa e introductoria del sistema o emulador.\n"
         "   - 'Calibracion_Hardware': Protocolos de botones, alineación IR, pasos específicos por modelo de Lightgun.\n"
         "   - 'Emuladores_Soportados': Cores, configuraciones, emuladores compatibles y archivos del sistema.\n"
@@ -216,58 +216,76 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         "   - 'Resolucion_Problemas': Fallos en pantalla, pérdida de tracking, bugs conocidos y parches técnicos.\n"
         "3. LÓGICA EVOLUTIVA: No borres datos antiguos. Si una sección ya tiene texto e ingresa información Tracking, haz un 'merge': combina "
         "ambos bloques redactando un manual unificado más extenso, detallado y jerarquizado. Si la información entrante es idéntica o desactualizada, "
-        "prioriza los datos más recientes y precisos. El objetivo final es que cada sección acumule conocimiento.\n"
-        "4. MULTIMEDIA BLINDADA: Combina las listas de 'imagenes_esquema' y 'videos_tutorial' preexistentes con las nuevas detectadas. Elimina duplicados exactos. "
-        "Usa exclusivamente las URLs completas del reporte. Prohibido inventar o alucinar enlaces.\n\n"
-        "REGLA SINTÁCTICA DE ESCAPE CRÍTICA:\n"
-        "Todo tu texto debe ir dentro de comillas en formato JSON válido. Si usas comillas dentro del texto usa comillas simples (' ejemplo ') o escápalas OBLIGATORIAMENTE con barra invertida (\\\" ejemplo \\\"). No generes saltos de línea de texto literales dentro de los strings; usa \\n si es necesario.\n\n"
-        "Responde EXCLUSIVAMENTE con el objeto JSON estructurado de este modo (sin delimitadores markdown de código o texto explicativo):\n"
-        "{\n"
-        "  \"rama\": \"Rama_Identificada\",\n"
-        "  \"subnodo\": \"subnodo_identificado\",\n"
-        "  \"datos\": {\n"
-        "    \"Descripcion\": \"...\",\n"
-        "    \"Calibracion_Hardware\": \"...\",\n"
-        "    \"Emuladores_Soportados\": \"...\",\n"
-        "    \"FAQ\": \"...\",\n"
-        "    \"Resolucion_Problemas\": \"...\",\n"
-        "    \"imagenes_esquema\": [\"URLs\"],\n"
-        "    \"videos_tutorial\": [\"URLs\"]\n"
-        "  }\n"
-        "}\n"
+        "prioriza los datos más recientes y precisos.\n"
+        "4. MULTIMEDIA BLINDADA: Combina las listas de imágenes y vídeos preexistentes con las nuevas detectadas. Elimina duplicados exactos.\n\n"
+        "REGLA DE FORMATO INQUEBRANTABLE: NO RESPONDAS EN JSON. Genera texto plano utilizando EXCLUSIVAMENTE los siguientes delimitadores taxonómicos para separar los campos. No agregues ninguna comilla de escape externa ni bloques de código markdown:\n\n"
+        "===RAMA===\n"
+        "Coloca aquí el nombre de la rama\n"
+        "===SUBNODO===\n"
+        "Coloca aquí el nombre del subnodo\n"
+        "===DESCRIPCION===\n"
+        "Coloca aquí el texto unificado de la sección\n"
+        "===CALIBRACION_HARDWARE===\n"
+        "Coloca aquí el texto unificado de la sección\n"
+        "===EMULADORES_SOPORTADOS===\n"
+        "Coloca aquí el texto unificado de la sección\n"
+        "===FAQ===\n"
+        "Coloca aquí el texto unificado de la sección\n"
+        "===RESOLUCION_PROBLEMAS===\n"
+        "Coloca aquí el texto unificado de la sección\n"
+        "===IMAGENES_ESQUEMA===\n"
+        "Coloca aquí una URL por línea\n"
+        "===VIDEOS_TUTORIAL===\n"
+        "Coloca aquí una URL por línea\n"
+        "===FIN==="
     )
 
     try:
         resultado_raw, canal_usado = ejecutar_ia_con_cascada(prompt_parseo, datos_completos_para_ia)
         
-        # Limpieza de envolturas Markdown si existiesen
-        resultado_raw = resultado_raw.strip()
-        if resultado_raw.startswith("```json"):
-            resultado_raw = resultado_raw[7:]
-        if resultado_raw.startswith("```"):
-            resultado_raw = resultado_raw[3:]
-        if resultado_raw.endswith("```"):
-            resultado_raw = resultado_raw[:-3]
-        resultado_raw = resultado_raw.strip()
+        # PARSER NATIVO MEDIANTE EXPRESIONES REGULARES (INMUNE A COMPORTAMIENTOS JSON ERÁTICOS)
+        def extraer_seccion(tag, texto_fuente, por_lineas=False):
+            patron = rf"==={tag}===\n(.*?)(?=\n===|$)"
+            match = re.search(patron, texto_fuente, re.DOTALL)
+            if match:
+                contenido = match.group(1).strip()
+                if por_lineas:
+                    return [linea.strip() for linea in contenido.split("\n") if linea.strip() and linea.strip().startswith("http")]
+                return contenido
+            return [] if por_lineas else ""
 
-        # Sanitizador táctico de strings JSON (reemplaza saltos de línea destructivos reales dentro del string)
-        # Esto previene el error 'Unterminated string' si la IA rompe el estándar JSON por accidente
-        resultado_sanitizado = re.sub(r'\n(?![\s\t]*[{}"\[\]])', r'\\n', resultado_raw)
+        rama = extraer_seccion("RAMA", resultado_raw) or rama_detectada
+        subnodo = extraer_seccion("SUBNODO", resultado_raw) or subnodo_detectado
         
-        objeto_datos = json.loads(resultado_sanitizado)
+        # Combinación inteligente y limpia de listas multimedia nativas
+        nuevas_img = extraer_seccion("IMAGENES_ESQUEMA", resultado_raw, por_lineas=True)
+        nuevos_vid = extraer_seccion("VIDEOS_TUTORIAL", resultado_raw, por_lineas=True)
         
-        rama = objeto_datos.get("rama", rama_detectada)
-        subnodo = objeto_datos.get("subnodo", subnodo_detectado)
-        payload = objeto_datos.get("datos")
-        payload["ultima_modificacion"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        payload["modificado_por"] = username
+        img_historicas = datos_existentes.get("imagenes_esquema", [])
+        vid_historicos = datos_existentes.get("videos_tutorial", [])
+        
+        # Merge de arrays eliminando duplicados preservando el orden histórico
+        img_finales = list(dict.fromkeys(img_historicas + nuevas_img))
+        vid_finales = list(dict.fromkeys(vid_historicos + nuevos_vid))
 
-        # Inyección dinámica mediante actualización parcial combinada
+        payload = {
+            "Descripcion": extraer_seccion("DESCRIPCION", resultado_raw),
+            "Calibracion_Hardware": extraer_seccion("CALIBRACION_HARDWARE", resultado_raw),
+            "Emuladores_Soportados": extraer_seccion("EMULADORES_SOPORTADOS", resultado_raw),
+            "FAQ": extraer_seccion("FAQ", resultado_raw),
+            "Resolucion_Problemas": extraer_seccion("RESOLUCION_PROBLEMAS", resultado_raw),
+            "imagenes_esquema": img_finales,
+            "videos_tutorial": vid_finales,
+            "ultima_modificacion": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            "modificado_por": username
+        }
+
+        # Inyección dinámica blindada en la base de datos distribuida de Firebase
         ref = db.reference(f'Enciclopedia_S2/{rama}/{subnodo}')
         ref.update(payload)
         
         prefijo_rango = "Comandante" if username.lower() == "@carlosfservan" else "Sargento"
-        return f"[{canal_usado}]\n\n{prefijo_rango}, la base de datos ha asimilado la información de forma incremental. El manual de '{rama}/{subnodo}' ha sido fusionado y expandido sin pérdidas en los archivos históricos."
+        return f"[{canal_usado}]\n\n{prefijo_rango}, la base de datos ha asimilado la información de forma incremental. El manual de '{rama}/{subnodo}' ha sido fusionado y expandido mediante el analizador nativo sin pérdidas sintácticas."
         
     except Exception as err:
         return f"Error en el sistema de ingesta táctica en cascada: {str(err)}. Transmisión abortada."
