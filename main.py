@@ -130,40 +130,46 @@ def extraer_contenido_url(texto: str) -> str:
         return f"\n[ERROR TÉCNICO AL ACCEDER A LA URL {url_objetivo}: {str(e)}]"
 
 def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
-    """Ejecuta una solicitud de IA en cascada para el módulo de inyección."""
+    """Ejecuta una solicitud de IA en cascada blindada con límites de salida ampliados."""
+    # Intentar Plan A: Groq
     try:
         completion = client_groq.chat.completions.create(
             model=MODELO_GROQ,
             messages=[{"role": "system", "content": prompt_sistema}, {"role": "user", "content": prompt_usuario}],
-            temperature=0.0
+            temperature=0.0,
+            max_tokens=4096
         )
         return completion.choices[0].message.content, "Canal Alpha - Groq"
     except Exception as e:
         print(f"⚠️ Ingesta Plan A fallida: {e}")
 
+    # Intentar Plan B: Mistral
     if MISTRAL_API_KEY:
         try:
             completion = client_mistral.chat.complete(
                 model="mistral-small-latest",
                 messages=[{"role": "system", "content": prompt_sistema}, {"role": "user", "content": prompt_usuario}],
-                temperature=0.0
+                temperature=0.0,
+                max_tokens=4096
             )
             return completion.choices[0].message.content, "Canal Bravo - Mistral"
         except Exception as e2:
             print(f"⚠️ Ingesta Plan B fallida: {e2}")
 
+    # Intentar Plan C: DeepSeek
     if DEEPSEEK_API_KEY:
         try:
             completion = client_deepseek.chat.completions.create(
                 model="deepseek-chat",
                 messages=[{"role": "system", "content": prompt_sistema}, {"role": "user", "content": prompt_usuario}],
-                temperature=0.0
+                temperature=0.0,
+                max_tokens=4096
             )
             return completion.choices[0].message.content, "Canal Charlie - DeepSeek"
         except Exception as e3:
             print(f"⚠️ Ingesta Plan C fallida: {e3}")
 
-    raise Exception("Todos los canales de procesamiento de IA se encuentran fuera de servicio.")
+    raise Exception("Todos los canales de procesamiento de IA se encuentran fuera de servicio debido a saturación de tokens.")
 
 def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     """Descarga la información existente, la fusiona inteligentemente con la nueva entrada y la actualiza."""
@@ -208,12 +214,12 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         "   - 'Emuladores_Soportados': Cores, configuraciones, emuladores compatibles y archivos del sistema.\n"
         "   - 'FAQ': Banco de preguntas y respuestas recopiladas.\n"
         "   - 'Resolucion_Problemas': Fallos en pantalla, pérdida de tracking, bugs conocidos y parches técnicos.\n"
-        "3. LÓGICA EVOLUTIVA: No borres datos antiguos. Si una sección ya tiene texto e ingresa información nueva, haz un 'merge': combina "
+        "3. LÓGICA EVOLUTIVA: No borres datos antiguos. Si una sección ya tiene texto e ingresa información Tracking, haz un 'merge': combina "
         "ambos bloques redactando un manual unificado más extenso, detallado y jerarquizado. Si la información entrante es idéntica o desactualizada, "
         "prioriza los datos más recientes y precisos. El objetivo final es que cada sección acumule conocimiento.\n"
         "4. MULTIMEDIA BLINDADA: Combina las listas de 'imagenes_esquema' y 'videos_tutorial' preexistentes con las nuevas detectadas. Elimina duplicados exactos. "
         "Usa exclusivamente las URLs completas del reporte. Prohibido inventar o alucinar enlaces.\n\n"
-        "Responde EXCLUSIVAMENTE con el objeto JSON estructurado de este modo (sin delimitadores markdown de código):\n"
+        "Responde EXCLUSIVAMENTE con el objeto JSON estructurado de este modo (sin delimitadores markdown de código o texto explicativo):\n"
         "{\n"
         "  \"rama\": \"Rama_Identificada\",\n"
         "  \"subnodo\": \"subnodo_identificado\",\n"
@@ -314,7 +320,8 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             res_mistral = client_mistral.chat.complete(
                 model="mistral-small-latest",
                 messages=[{"role": "system", "content": instrucciones_completas}, {"role": "user", "content": mensaje_usuario}],
-                temperature=0.0
+                temperature=0.0,
+                max_tokens=2048
             )
             await update.message.reply_text(f"[Canal Bravo - Mistral]\n\n{res_mistral.choices[0].message.content}")
             return
@@ -327,7 +334,8 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             res_ds = client_deepseek.chat.completions.create(
                 model="deepseek-chat",
                 messages=[{"role": "system", "content": instrucciones_completas}, {"role": "user", "content": mensaje_usuario}],
-                temperature=0.0
+                temperature=0.0,
+                max_tokens=2048
             )
             await update.message.reply_text(f"[Canal Charlie - DeepSeek]\n\n{res_ds.choices[0].message.content}")
             return
