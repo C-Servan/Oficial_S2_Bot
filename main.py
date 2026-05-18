@@ -192,6 +192,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Soporte polimórfico: Maneja tanto mensajes directos como redirecciones de CallbackQueries de botones
     is_callback = update.callback_query is not None
+    destino_chat_id = update.effective_chat.id
     
     if is_callback:
         user = update.callback_query.from_user
@@ -237,6 +238,13 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await transmitir_anecdota_automatica(context)
         return
 
+    # PRIORIDAD CRÍTICA: SI EL USUARIO PIDE AYUDA O MENÚ, LIMPIAMOS CUALQUIER RESIDUO DE MEMORIA
+    if mensaje_usuario.lower() in ["ayuda", "/ayuda", "menu", "menú"]:
+        context.user_data.pop("forzar_subnodo", None)
+        if not is_callback:
+            await menus.activar_encuesta_indice(update, context, mensaje_usuario)
+        return
+
     # ANALIZADOR DE CONTEXTO REAL EN FIREBASE
     if "forzar_subnodo" in context.user_data or is_callback:
         subnodo_elegido = context.user_data.pop("forzar_subnodo", mensaje_usuario)
@@ -258,26 +266,32 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             contexto_real, coincidencia = "", False
 
-    # SI NO HAY COINCIDENCIA, SE DISPARA LA INTERFAZ INTERACTIVA (Excluyendo llamadas de botones activos)
-    if not coincidencia or mensaje_usuario.lower() in ["ayuda", "/ayuda", "menu", "menú"]:
+    # SI NO HAY COINCIDENCIA, SE DISPARA LA INTERFAZ INTERACTIVA
+    if not coincidencia:
         if not is_callback:
             await menus.activar_encuesta_indice(update, context, mensaje_usuario)
         return
 
     # FLUJO SEGURO DE IA EN CASCADA
     try:
+        print(f"🤖 [S-2] Enviando consulta a la cascada de IA para el subnodo: {mensaje_usuario}")
         respuesta, canal = ai_cascade.procesar_consulta_directa(mensaje_usuario, contexto_real, username)
-        if is_callback:
-            await context.bot.send_message(chat_id=msg_obj.chat_id, text=f"[{canal}]\n\n{respuesta}")
+        
+        if respuesta and respuesta.strip():
+            await context.bot.send_message(chat_id=destino_chat_id, text=f"[{canal}]\n\n{respuesta}")
         else:
-            await msg_obj.reply_text(f"[{canal}]\n\n{respuesta}")
+            await context.bot.send_message(
+                chat_id=destino_chat_id, 
+                text="⚠️ **ALERTA S-2**\nLos canales de IA respondieron vacíos. Verifique que el nodo no esté en blanco en Firebase."
+            )
     except Exception as e:
         print(f"❌ Error crítico en cascada de IA: {e}")
-        error_msg = "❌ INTERFERENCIA: Todos los canales de inteligencia están caídos debido a desbordamiento."
-        if is_callback:
-            await context.bot.send_message(chat_id=msg_obj.chat_id, text=error_msg)
-        else:
-            await msg_obj.reply_text(error_msg)
+        error_msg = (
+            f"❌ **INTERFERENCIA S-2**\n"
+            f"No se ha podido procesar el reporte de [ {mensaje_usuario.upper()} ].\n"
+            f"Causa técnica: Los servidores de la IA externa (Groq/Mistral) han rechazado la solicitud o se ha agotado el tiempo de espera."
+        )
+        await context.bot.send_message(chat_id=destino_chat_id, text=error_msg)
 
 # --- 3.5 TRANSMISOR AUTOMÁTICO DE ANÉCDOTAS (3 VECES POR SEMANA) ---
 async def transmitir_anecdota_automatica(context: ContextTypes.DEFAULT_TYPE):
@@ -304,7 +318,7 @@ async def transmitir_anecdota_automatica(context: ContextTypes.DEFAULT_TYPE):
             "Actúas como el Oficial de Inteligencia S-2. Tu misión es redactar un despacho informativo corto, "
             "interesante y sumamente táctico para la unidad, basado en los datos de curiosidades/anécdotas provistos.\n"
             "Comienza estrictamente con: '📢 DESPACHO DE INTELIGENCIA HISTÓRICA S-2'\n"
-            "Mantén tu tono seco, veterano y disciplinado. Termina con tu firma reglamentaria: Cambio y corto. ¡RELOAD!"
+            "Mantén tu tono seco, veterano y disciplined. Termina con tu firma reglamentaria: Cambio y corto. ¡RELOAD!"
         )
         
         contexto_datos = f"SUBTEMA: {subnodo_elegido}\nDATOS: {json.dumps(datos_raw, ensure_ascii=False)}"
