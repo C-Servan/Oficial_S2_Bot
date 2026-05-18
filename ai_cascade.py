@@ -80,47 +80,56 @@ def procesar_consulta_directa(mensaje_usuario: str, contexto_real_json: str, use
     Prepara los metadatos y el contexto estructurado para lanzarlo a la cascada de IA.
     Limpia el JSON masivo para evitar desbordamientos de tokens en el prompt de sistema.
     """
+    # Blindaje de identidad contra datos corruptos u objetos herederos de callbacks de Telegram
+    username_limpio = str(username) if username else "Operador Autorizado"
+    
     contexto_situacional = (
         f"\n--- METADATOS DE LA TRANSMISIÓN ---\n"
         f"FECHA Y HORA ACTUAL: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
-        f"IDENTIDAD DEL REMITENTE: {username}\n"
+        f"IDENTIDAD DEL REMITENTE: {username_limpio}\n"
         f"------------------------------------\n"
     )
     
-    # Intentamos parsear y limpiar el JSON de Firebase para transformarlo en texto plano digerible por la IA
     texto_contexto_limpio = ""
     if contexto_real_json:
         try:
-            # Si viene con el encabezado de depuración manual, lo extraemos
             json_puro = contexto_real_json
-            if "--- DATOS REALES" in contexto_real_json:
-                lineas = contexto_real_json.split("\n")
-                # Unimos solo las líneas que correspondan al objeto JSON real
-                json_puro = "\n".join([l for l in lineas if not l.startswith("---") and not l.startswith("RAMA:")])
+            # Extracción segura: Localizamos las llaves del objeto JSON ignorando cabeceras
+            inicio_json = contexto_real_json.find('{')
+            fin_json = contexto_real_json.rfind('}') + 1
+            if inicio_json != -1 and fin_json != -1:
+                json_puro = contexto_real_json[inicio_json:fin_json]
             
             datos = json.loads(json_puro.strip())
             if isinstance(datos, dict):
-                # Desglosamos las categorías de manera limpia
                 for clave, valor in datos.items():
                     if clave in ["imagenes_esquema", "videos_tutorial", "ultima_modificacion", "modificado_por"]:
-                        continue # Omitimos metadatos multimedia pesados en el texto para ahorrar tokens
+                        continue # Omitimos metadatos multimedia pesados en el prompt
                     texto_contexto_limpio += f"📂 SECCIÓN: {clave.upper()}\n{valor}\n\n"
             else:
                 texto_contexto_limpio = str(datos)
         except Exception as err_json:
-            print(f"⚠️ [IA CASCADE] No se pudo parsear el contexto como JSON, enviando texto crudo recortado: {err_json}")
-            texto_contexto_limpio = contexto_real_json[:6000] # Recorte estricto preventivo de seguridad
+            print(f"⚠️ [IA CASCADE] No se pudo parsear el contexto como JSON, enviando texto de contingencia: {err_json}")
+            texto_contexto_limpio = contexto_real_json[:4000]
 
-    # El prompt del sistema solo dicta la personalidad y metadatos limpios
+    if not texto_contexto_limpio.strip():
+        texto_contexto_limpio = "No se han encontrado registros preexistentes en este nodo de la base de datos."
+
+    # El prompt del sistema dicta la personalidad y metadatos limpios
     prompt_sistema = f"{instrucciones_base}\n{contexto_situacional}"
     
+    # Optimizador de órdenes: Si el input es una sola palabra (un botón como 'retrobat'),
+    # le damos una instrucción imperativa estructurada para guiar a la IA.
+    peticion_operador = mensaje_usuario
+    if mensaje_usuario and len(mensaje_usuario.split()) == 1:
+        peticion_operador = f"Genera, sintetiza y organiza un reporte técnico completo y detallado para el subnodo operativo: {mensaje_usuario}."
+
     # Construimos el prompt de usuario empaquetando el manual de Firebase de forma segura
     prompt_usuario_estructurado = (
         f"=== MANUALES TÉCNICOS EXTRAÍDOS DE LA BASE DE DATOS S-2 ===\n"
-        f"{texto_contexto_limpio if texto_contexto_limpio else 'No se han encontrado registros preexistentes en este nodo.'}\n"
+        f"{texto_contexto_limpio}\n"
         f"===========================================================\n\n"
-        f"CONSULTA DEL OPERADOR: {mensaje_usuario}"
+        f"INSTRUCCIÓN DEL OPERADOR: {peticion_operador}"
     )
     
-    # Limitamos a 2048 tokens la respuesta para evitar cortes en chats estándar
     return ejecutar_ia_con_cascada(prompt_sistema, prompt_usuario_estructurado, max_tokens=2048)
