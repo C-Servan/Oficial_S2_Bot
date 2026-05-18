@@ -34,15 +34,17 @@ if firebase_creds_json:
     except Exception as e:
         print(f"❌ Error crítico al inicializar Firebase: {e}")
 
-def obtener_contexto_inteligente(mensaje_usuario: str) -> str:
-    """Busca de forma ultra-ligera en Firebase usando shallow=True para evitar descargas masivas."""
+def obtener_contexto_inteligente(mensaje_usuario: str) -> tuple:
+    """
+    Busca de forma ultra-ligera en Firebase usando shallow=True.
+    Retorna una tupla: (contexto_str, coincidencia_detectada_bool, mapa_completo_ramas)
+    """
     try:
         ref_raiz = db.reference('Enciclopedia_S2')
-        # shallow=True descarga SOLO las claves de primer nivel (Ramas) sin sus contenidos
         ramas_claves = ref_raiz.get(shallow=True)
         
         if not ramas_claves:
-            return "No hay datos registrados en la enciclopedia aún."
+            return ("No hay datos registrados en la enciclopedia aún.", False, {})
         
         mensaje_min = mensaje_usuario.lower()
         mapa_conocimiento = {}
@@ -52,14 +54,12 @@ def obtener_contexto_inteligente(mensaje_usuario: str) -> str:
         # Fase 1: Mapear la estructura superficial de subnodos de forma ultra-rápida
         for rama in ramas_claves.keys():
             ref_subnodos = db.reference(f'Enciclopedia_S2/{rama}')
-            # Volvemos a usar shallow=True para obtener solo los nombres de los subnodos
             subnodos_claves = ref_subnodos.get(shallow=True)
             
             if subnodos_claves and isinstance(subnodos_claves, dict):
                 lista_subnodos = list(subnodos_claves.keys())
                 mapa_conocimiento[rama] = lista_subnodos
                 
-                # Verificar si el usuario menciona algún subnodo guardado
                 for subnodo in lista_subnodos:
                     if subnodo.lower() in mensaje_min or subnodo.replace("_", "") in mensaje_min:
                         subnodo_objetivo = subnodo
@@ -70,25 +70,20 @@ def obtener_contexto_inteligente(mensaje_usuario: str) -> str:
         # Fase 2: Descargar de Firebase ÚNICAMENTE el subnodo solicitado si hay coincidencia
         if subnodo_objetivo and rama_objetivo:
             ref_especifica = db.reference(f'Enciclopedia_S2/{rama_objetivo}/{subnodo_objetivo}')
-            datos_subnodo = ref_especifica.get() # Aquí sí descargamos el contenido, pero solo de ESTE subnodo
+            datos_subnodo = ref_especifica.get()
             
             contexto = "\n--- DATOS REALES EXTRAÍDOS DE LA ENCICLOPEDIA (COINCIDENCIA DETECTADA) ---\n"
             contexto += f"RAMA: {rama_objetivo} | SUBNODO: {subnodo_objetivo}\n"
             contexto += json.dumps(datos_subnodo, indent=2, ensure_ascii=False)
             contexto += "\n--- FIN DE LOS DATOS REALES RECUPERADOS ---\n"
-            return contexto
+            return (contexto, True, mapa_conocimiento)
             
-        # Si no hay coincidencia, enviamos el mapa taxonómico ligero a la IA
-        contexto_ligero = "\n--- ÍNDICE DE CONTENIDOS DISPONIBLES EN EL OFICIAL S-2 ---\n"
-        contexto_ligero += f"Sistemas indexados actualmente: {json.dumps(mapa_conocimiento, ensure_ascii=False)}\n"
-        contexto_ligero += "REGLA OPERATIVA: El usuario está preguntando por un sistema que NO tienes en tu base de datos real.\n"
-        contexto_ligero += "Infórmale con disciplina militar de que esos datos no constan en tus archivos de inteligencia y que requiere realizar una ingesta usando el comando /guardar.\n"
-        contexto_ligero += "--------------------------------------------------------\n"
-        return contexto_ligero
+        # Si no hay coincidencia, devolvemos falso y el mapa para armar el menú/encuesta interactiva
+        return ("", False, mapa_conocimiento)
 
     except Exception as e:
         print(f"Error crítico en filtro analítico de contexto: {e}")
-        return "Error limitador al recuperar contexto real por saturación."
+        return ("Error limitador al recuperar contexto real por saturación.", False, {})
 
 # --- 2. CONFIGURACIÓN DEL SERVIDOR WEB ---
 app = Flask(__name__)
@@ -171,7 +166,6 @@ def extraer_contenido_url(texto: str) -> str:
 
 def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
     """Ejecuta una solicitud de IA en cascada blindada con límites de salida ampliados."""
-    # Intentar Plan A: Groq
     try:
         completion = client_groq.chat.completions.create(
             model=MODELO_GROQ,
@@ -183,7 +177,6 @@ def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
     except Exception as e:
         print(f"⚠️ Ingesta Plan A fallida: {e}")
 
-    # Intentar Plan B: Mistral
     if MISTRAL_API_KEY:
         try:
             completion = client_mistral.chat.complete(
@@ -196,7 +189,6 @@ def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
         except Exception as e2:
             print(f"⚠️ Ingesta Plan B fallida: {e2}")
 
-    # Intentar Plan C: DeepSeek
     if DEEPSEEK_API_KEY:
         try:
             completion = client_deepseek.chat.completions.create(
@@ -217,7 +209,6 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     if username.lower() not in autorizados:
         return f"Recluta, transmision denegada. No posees autorización de escritura en los Archivos de Inteligencia S-2."
 
-    # Pre-análisis táctico de la ruta de destino antes de la ejecución de IA
     partes = comando_texto.replace("/guardar", "").split("|")
     rama_detectada = "1_Manuales_tecnicos"
     subnodo_detectado = "desconocido"
@@ -226,7 +217,6 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         rama_detectada = partes[0].strip()
         subnodo_detectado = partes[1].strip().lower().replace(" ", "")
 
-    # Descarga analítica del estado actual del subnodo en Firebase
     datos_existentes = {}
     try:
         ref_existente = db.reference(f'Enciclopedia_S2/{rama_detectada}/{subnodo_detectado}')
@@ -240,9 +230,6 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     if not contenido_web or "[ERROR TÉCNICO" in contenido_web:
         return f"Error en la extracción de la URL. Abortando misión: {contenido_web}"
 
-    # ==========================================
-    # PASO 1: PASADA DE RECONOCIMIENTO (MAPEO DEL ÍNDICE)
-    # ==========================================
     prompt_indexador = (
         "Actúas como el Ingeniero de Reconocimiento del Oficial S-2. Tu único objetivo es analizar la información textual extraída de una web "
         "y estructurar un ÍNDICE DINÁMICO de categorías estandarizadas basadas estrictamente en la materia tratada en el documento.\n\n"
@@ -264,9 +251,6 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         print(f"Fallo en indexador dinámico, aplicando categorías base: {err_idx}")
         categorias = ["Manual_Instalacion", "Calibracion_Hardware", "FAQ", "Resolucion_Problemas"]
 
-    # ==========================================
-    # PASO 2: FUSIÓN Y ASIMILACIÓN POR OLEADAS SECUENCIALES
-    # ==========================================
     payload_acumulado = {}
     canales_utilizados = []
     
@@ -336,16 +320,16 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.message.from_user
     username = f"@{user.username}" if user.username else user.first_name
-    mensaje_usuario = update.message.text
+    mensaje_usuario = update.message.text.strip()
 
     # INTERCEPTOR DE COMANDO /GUARDAR
-    if mensaje_usuario.strip().startswith("/guardar"):
+    if mensaje_usuario.startswith("/guardar"):
         resultado_guardado = ejecutar_ingesta_base_datos(username, mensaje_usuario)
         await update.message.reply_text(f"{resultado_guardado}\n\nCambio y corto. ¡RELOAD!")
         return
 
     # COMANDO O PREGUNTA DE ESTADO SISTEMA
-    if mensaje_usuario.strip().lower() in ["/estado", "estado", "¿con qué ia estás trabajando?", "con que ia estas trabajando"]:
+    if mensaje_usuario.lower() in ["/estado", "estado", "¿con qué ia estás trabajando?", "con que ia estas trabajando"]:
         reporte_estado = (
             "📊 **INFORME DE ESTADO OPERATIVO - OFICIAL S-2**\n"
             f"• Canal Alpha (Groq - {MODELO_GROQ}): {'🟢 ONLINE' if GROQ_API_KEY else '🔴 OFFLINE'}\n"
@@ -357,6 +341,95 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(reporte_estado, parse_mode="Markdown")
         return
 
+    # ==========================================
+    # SISTEMA INTERACTIVO TÁCTICO: ENCUESTA DEL ÍNDICE
+    # ==========================================
+    contexto_real, coincidencia, mapa_completo = obtener_contexto_inteligente(mensaje_usuario)
+    listado_ramas = sorted(list(mapa_completo.keys())) if mapa_completo else []
+
+    # Inicializar estado en la sesión temporal si no existe
+    if 'encuesta_paso' not in context.user_data:
+        context.user_data['encuesta_paso'] = None
+
+    # PASO INTERMEDIO: El usuario seleccionó una Rama y ahora elige el Subnodo
+    if context.user_data['encuesta_paso'] == 'esperando_subnodo':
+        rama_seleccionada = context.user_data.get('rama_seleccionada')
+        subnodos_disponibles = mapa_completo.get(rama_seleccionada, [])
+        
+        try:
+            indice_elegido = int(mensaje_usuario) - 1
+            if 0 <= indice_elegido < len(subnodos_disponibles):
+                subnodo_elegido = subnodos_disponibles[indice_elegido]
+                
+                # Reseteamos estado y forzamos la consulta directa del nodo seleccionado
+                context.user_data['encuesta_paso'] = None
+                mensaje_usuario = subnodo_elegido  # Forzamos re-evaluación
+                contexto_real, coincidencia, _ = obtener_contexto_inteligente(mensaje_usuario)
+            else:
+                await update.message.reply_text(f"⚠️ Selección inválida. Por favor, introduce un número del 1 al {len(subnodos_disponibles)}.")
+                return
+        except ValueError:
+            # Si escribe el nombre directamente en vez del número
+            if mensaje_usuario.lower() in [s.lower() for s in subnodos_disponibles]:
+                context.user_data['encuesta_paso'] = None
+                contexto_real, coincidencia, _ = obtener_contexto_inteligente(mensaje_usuario)
+            else:
+                await update.message.reply_text("Envíe el número correspondiente de la lista militar o escriba cancelar.")
+                return
+
+    # PASO INICIAL: El usuario elige qué Rama quiere explorar
+    elif context.user_data['encuesta_paso'] == 'esperando_rama':
+        if mensaje_usuario.lower() in ['cancelar', 'salir', '/start']:
+            context.user_data['encuesta_paso'] = None
+            await update.message.reply_text("Protocolo de navegación cancelado. Volviendo a modo de guardia.")
+            return
+            
+        try:
+            indice_elegido = int(mensaje_usuario) - 1
+            if 0 <= indice_elegido < len(listado_ramas):
+                rama_seleccionada = listado_ramas[indice_elegido]
+                subnodos = mapa_completo.get(rama_seleccionada, [])
+                
+                if not subnodos:
+                    await update.message.reply_text(f"La sección *{rama_seleccionada}* está vacía actualmente. Busque en otra división.")
+                    context.user_data['encuesta_paso'] = None
+                    return
+                
+                context.user_data['rama_seleccionada'] = rama_seleccionada
+                context.user_data['encuesta_paso'] = 'esperando_subnodo'
+                
+                menu_subnodos = f"📂 **DIVISIÓN SELECCIONADA:** {rama_seleccionada}\n\nSeleccione el número del archivo que desea consultar:\n"
+                for i, sub in enumerate(subnodos, 1):
+                    menu_subnodos += f"**[{i}]** {sub.replace('_', ' ').title()}\n"
+                
+                await update.message.reply_text(menu_subnodos, parse_mode="Markdown")
+                return
+            else:
+                await update.message.reply_text(f"⚠️ Selección fuera de rango. Introduzca un número entre 1 y {len(listado_ramas)}.")
+                return
+        except ValueError:
+            await update.message.reply_text("Por favor, responda con el número asignado a la sección.")
+            return
+
+    # ACTIVADOR DE LA ENCUESTA (Si no hay coincidencia exacta o pide ayuda)
+    if not coincidencia or mensaje_usuario.lower() in ["ayuda", "/ayuda", "ayudame", "menú", "menu"]:
+        context.user_data['encuesta_paso'] = 'esperando_rama'
+        
+        menu_principal = (
+            f"📋 **ENCUESTA DEL ÍNDICE DE INTELIGENCIA S-2**\n\n"
+            f"Comandante, el término que busca no consta en los registros de acceso rápido o ha solicitado el mapeo general.\n"
+            f"Por favor, elija qué división de la base de datos desea abrir (responda solo con el **NÚMERO**):\n\n"
+        )
+        for i, rama in enumerate(listado_ramas, 1):
+            menu_principal += f"**[{i}]** {rama.replace('_', ' ').title()}\n"
+            
+        menu_principal += "\n💡 *O responda 'cancelar' en cualquier momento para salir.*"
+        await update.message.reply_text(menu_principal, parse_mode="Markdown")
+        return
+
+    # ==========================================
+    # FLUJO NORMAL CON IA SI COINCIDE EL ARCHIVO
+    # ==========================================
     contexto_situacional = (
         f"\n--- METADATOS DE LA TRANSMISIÓN ---\n"
         f"FECHA Y HORA ACTUAL: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
@@ -364,8 +437,6 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"------------------------------------\n"
     )
 
-    # Llamada al nuevo extractor selectivo inteligente para mitigar desbordamientos
-    contexto_real = obtener_contexto_inteligente(mensaje_usuario)
     instrucciones_completas = f"{instrucciones_base}\n{contexto_situacional}\n{contexto_real}"
 
     # --- PLAN A: GROQ ---
