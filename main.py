@@ -4,7 +4,8 @@ import threading
 import time
 import json
 import re
-from datetime import datetime
+import random
+from datetime import datetime, time as datetime_time
 from flask import Flask
 from telegram import Update
 from telegram.ext import (
@@ -223,6 +224,11 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg_obj.reply_text(reporte_estado, parse_mode="Markdown")
         return
 
+    # COMANDO MANUAL PARA TRANSMITIR ANÉCDOTAS DE PRUEBA
+    if not is_callback and mensaje_usuario.lower() == "/anecdota":
+        await transmitir_anecdota_automatica(context)
+        return
+
     # ANALIZADOR DE CONTEXTO REAL EN FIREBASE
     if "forzar_subnodo" in context.user_data:
         subnodo_elegido = context.user_data.pop("forzar_subnodo")
@@ -257,6 +263,51 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"❌ Error crítico en cascada de IA: {e}")
         await msg_obj.reply_text("❌ INTERFERENCIA: Todos los canales de inteligencia están caídos debido a desbordamiento.")
 
+# --- 3.5 TRANSMISOR AUTOMÁTICO DE ANÉCDOTAS (3 VECES POR SEMANA) ---
+async def transmitir_anecdota_automatica(context: ContextTypes.DEFAULT_TYPE):
+    """Extrae una pieza aleatoria del nodo histórico '3_Archivo_historico' de Firebase y la difunde."""
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not chat_id:
+        print("⚠️ [PLANIFICADOR] Omitiendo envío: No se ha configurado la variable TELEGRAM_CHAT_ID en Render.")
+        return
+
+    try:
+        from firebase_admin import db
+        ref_historica = db.reference('Enciclopedia_S2/3_Archivo_historico')
+        archivo = ref_historica.get()
+        
+        if not archivo:
+            print("⚠️ [PLANIFICADOR] Rama '3_Archivo_historico' vacía en Firebase.")
+            return
+            
+        subnodos_disponibles = list(archivo.keys())
+        subnodo_elegido = random.choice(subnodos_disponibles)
+        datos_raw = archivo[subnodo_elegido]
+        
+        prompt_redaccion = (
+            "Actúas como el Oficial de Inteligencia S-2. Tu misión es redactar un despacho informativo corto, "
+            "interesante y sumamente táctico para la unidad, basado en los datos de curiosidades/anécdotas provistos.\n"
+            "Comienza estrictamente con: '📢 DESPACHO DE INTELIGENCIA HISTÓRICA S-2'\n"
+            "Mantén tu tono seco, veterano y disciplinado. Termina con tu firma reglamentaria: Cambio y corto. ¡RELOAD!"
+        )
+        
+        contexto_datos = f"SUBTEMA: {subnodo_elegido}\nDATOS: {json.dumps(datos_raw, ensure_ascii=False)}"
+        despacho_final, canal = ai_cascade.ejecutar_ia_con_cascada(prompt_redaccion, contexto_datos)
+        
+        imagenes = datos_raw.get("imagenes_esquema", [])
+        videos = datos_raw.get("videos_tutorial", [])
+        
+        if imagenes and isinstance(imagenes, list) and len(imagenes) > 0:
+            despacho_final += f"\n\n📷 Archivo visual histórico: {imagenes[0]}"
+        if videos and isinstance(videos, list) and len(videos) > 0:
+            despacho_final += f"\n\n🎥 Registro audiovisual complementario: {videos[0]}"
+
+        await context.bot.send_message(chat_id=chat_id, text=despacho_final)
+        print(f"✅ [PLANIFICADOR] Despacho histórico enviado con éxito sobre: {subnodo_elegido}.")
+        
+    except Exception as e:
+        print(f"❌ [PLANIFICADOR] Error en la ejecución del despacho automático: {e}")
+
 # --- 4. LANZAMIENTO Y CONFIGURACIÓN DEL BOT ---
 def main():
     import asyncio
@@ -277,7 +328,7 @@ def main():
     threading.Thread(target=run_flask, daemon=True).start()
 
     try:
-        # 3. Construimos la aplicación ampliando el pool de timeouts de red para evitar cortes
+        # 3. Construimos la aplicación ampliando el pool de timeouts e inyectando soporte para JobQueue
         application = (
             Application.builder()
             .token(ai_cascade.TELEGRAM_TOKEN)
@@ -287,6 +338,14 @@ def main():
             .pool_timeout(30)
             .build()
         )
+        
+        # PROGRAMACIÓN DEL CRONOGRAMA DE ANÉCDOTAS (Lunes, Miércoles y Viernes a las 12:00 PM)
+        job_queue = application.job_queue
+        if job_queue:
+            job_queue.run_daily(transmitir_anecdota_automatica, time=datetime_time(12, 0, 0), days=(0,))
+            job_queue.run_daily(transmitir_anecdota_automatica, time=datetime_time(12, 0, 0), days=(2,))
+            job_queue.run_daily(transmitir_anecdota_automatica, time=datetime_time(12, 0, 0), days=(4,))
+            print("📅 [SISTEMA] Cronograma de transmisiones históricas establecido (Lun, Mié, Vie).")
         
         # CONFIGURACIÓN DEL CONTROLADOR DE CONVERSACIONES NATIVO (FSM)
         manejador_encuesta = ConversationHandler(
