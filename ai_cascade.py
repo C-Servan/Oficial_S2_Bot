@@ -7,7 +7,8 @@ from groq import Groq
 from mistralai import Mistral
 from openai import OpenAI
 
-# Inicialización de Clientes de IA
+# Inicialización de Tokens y Clientes de IA
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY')
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
