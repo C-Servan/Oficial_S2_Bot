@@ -219,6 +219,8 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         "prioriza los datos más recientes y precisos. El objetivo final es que cada sección acumule conocimiento.\n"
         "4. MULTIMEDIA BLINDADA: Combina las listas de 'imagenes_esquema' y 'videos_tutorial' preexistentes con las nuevas detectadas. Elimina duplicados exactos. "
         "Usa exclusivamente las URLs completas del reporte. Prohibido inventar o alucinar enlaces.\n\n"
+        "REGLA SINTÁCTICA DE ESCAPE CRÍTICA:\n"
+        "Todo tu texto debe ir dentro de comillas en formato JSON válido. Si usas comillas dentro del texto usa comillas simples (' ejemplo ') o escápalas OBLIGATORIAMENTE con barra invertida (\\\" ejemplo \\\"). No generes saltos de línea de texto literales dentro de los strings; usa \\n si es necesario.\n\n"
         "Responde EXCLUSIVAMENTE con el objeto JSON estructurado de este modo (sin delimitadores markdown de código o texto explicativo):\n"
         "{\n"
         "  \"rama\": \"Rama_Identificada\",\n"
@@ -238,12 +240,21 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     try:
         resultado_raw, canal_usado = ejecutar_ia_con_cascada(prompt_parseo, datos_completos_para_ia)
         
+        # Limpieza de envolturas Markdown si existiesen
+        resultado_raw = resultado_raw.strip()
         if resultado_raw.startswith("```json"):
             resultado_raw = resultado_raw[7:]
+        if resultado_raw.startswith("```"):
+            resultado_raw = resultado_raw[3:]
         if resultado_raw.endswith("```"):
             resultado_raw = resultado_raw[:-3]
+        resultado_raw = resultado_raw.strip()
+
+        # Sanitizador táctico de strings JSON (reemplaza saltos de línea destructivos reales dentro del string)
+        # Esto previene el error 'Unterminated string' si la IA rompe el estándar JSON por accidente
+        resultado_sanitizado = re.sub(r'\n(?![\s\t]*[{}"\[\]])', r'\\n', resultado_raw)
         
-        objeto_datos = json.loads(resultado_raw.strip())
+        objeto_datos = json.loads(resultado_sanitizado)
         
         rama = objeto_datos.get("rama", rama_detectada)
         subnodo = objeto_datos.get("subnodo", subnodo_detectado)
