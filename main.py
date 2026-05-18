@@ -95,17 +95,16 @@ def extraer_contenido_url(texto: str) -> str:
             html = response.read()
             soup = BeautifulSoup(html, 'html.parser')
             
-            # 1. Extracción y normalización de imágenes reales antes de limpiar
+            # 1. Extracción y normalización de imágenes reales
             imagenes_encontradas = []
             for img in soup.find_all('img'):
                 src = img.get('src')
                 if src and not src.startswith('data:'):
-                    # Convertir rutas relativas en URLs absolutas completas
                     url_completa = urljoin(url_objetivo, src)
                     if url_completa not in imagenes_encontradas:
                         imagenes_encontradas.append(url_completa)
             
-            # 2. Extracción de vídeos (YouTube o similares)
+            # 2. Extracción de vídeos (YouTube)
             videos_encontrados = []
             for a in soup.find_all('a', href=True):
                 href = a['href']
@@ -114,18 +113,17 @@ def extraer_contenido_url(texto: str) -> str:
                     if url_video not in videos_encontrados:
                         videos_encontrados.append(url_video)
 
-            # Limpieza de elementos de interfaz irrelevantes
+            # Limpieza de elementos de interfaz de la web
             for element in soup(["script", "style", "nav", "footer", "header", "aside"]):
                 element.decompose()
                 
             texto_limpio = soup.get_text(separator=' ', strip=True)
             
-            # Empaquetado de telemetría multimedia para la IA
             reporte_web = (
                 f"\n[CONTENIDO EXTRAÍDO DE LA URL: {url_objetivo}]\n"
                 f"TEXTO BASE DE LA WEB:\n{texto_limpio}\n\n"
                 f"LISTA DE IMÁGENES REALES DETECTADAS:\n{json.dumps(imagenes_encontradas)}\n\n"
-                f"LISTA DE VÍDEOS REALES DETECTADAS:\n{json.dumps(videos_encontrados)}\n"
+                f"LISTA DE VÍDEOS REALES DETECTADOS:\n{json.dumps(videos_encontrados)}\n"
             )
             return reporte_web
     except Exception as e:
@@ -133,7 +131,6 @@ def extraer_contenido_url(texto: str) -> str:
 
 def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
     """Ejecuta una solicitud de IA en cascada para el módulo de inyección."""
-    # Intentar Plan A: Groq
     try:
         completion = client_groq.chat.completions.create(
             model=MODELO_GROQ,
@@ -144,7 +141,6 @@ def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
     except Exception as e:
         print(f"⚠️ Ingesta Plan A fallida: {e}")
 
-    # Intentar Plan B: Mistral
     if MISTRAL_API_KEY:
         try:
             completion = client_mistral.chat.complete(
@@ -156,7 +152,6 @@ def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
         except Exception as e2:
             print(f"⚠️ Ingesta Plan B fallida: {e2}")
 
-    # Intentar Plan C: DeepSeek
     if DEEPSEEK_API_KEY:
         try:
             completion = client_deepseek.chat.completions.create(
@@ -171,36 +166,67 @@ def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
     raise Exception("Todos los canales de procesamiento de IA se encuentran fuera de servicio.")
 
 def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
-    """Analiza y vuelca el contenido web estructurándolo dinámicamente sin límites de campos."""
+    """Descarga la información existente, la fusiona inteligentemente con la nueva entrada y la actualiza."""
     autorizados = ["@carlosfservan", "@gargarensis76", "@gwyllion16"]
     if username.lower() not in autorizados:
         return f"Recluta, transmision denegada. No posees autorización de escritura en los Archivos de Inteligencia S-2."
 
+    # Pre-análisis táctico de la ruta de destino antes de la ejecución de IA
+    partes = comando_texto.replace("/guardar", "").split("|")
+    rama_detectada = "1_Manuales_tecnicos"
+    subnodo_detectado = "desconocido"
+    
+    if len(partes) >= 2:
+        rama_detectada = partes[0].strip()
+        subnodo_detectado = partes[1].strip().lower().replace(" ", "")
+
+    # Descarga analítica del estado actual del subnodo en Firebase
+    datos_existentes_json = "{}"
+    try:
+        ref_existente = db.reference(f'Enciclopedia_S2/{rama_detectada}/{subnodo_detectado}')
+        nodo_actual = ref_existente.get()
+        if nodo_actual:
+            datos_existentes_json = json.dumps(nodo_actual, ensure_ascii=False)
+    except Exception as e:
+        print(f"Aviso: No se pudo leer el histórico (procesando como nodo nuevo): {e}")
+
     contenido_web = extraer_contenido_url(comando_texto)
-    datos_completos_para_ia = f"Orden del operador:\n{comando_texto}\n{contenido_web}"
+    
+    datos_completos_para_ia = (
+        f"--- CONOCIMIENTO HISTÓRICO ALMACENADO EN FIREBASE ---\n{datos_existentes_json}\n\n"
+        f"--- NUEVA INFORMACIÓN ENTRANTE ENVIADA POR OPERADOR ---\n{comando_texto}\n{contenido_web}"
+    )
 
     prompt_parseo = (
-        "Actúa como el submódulo de indexación dinámica del Oficial S-2. Tu objetivo es procesar la información técnica "
-        "y los arrays de multimedia real proporcionados, estructurándolos en un formato JSON completo, extenso y ordenado.\n\n"
-        "REGLAS OBLIGATORIAS DE ESTRUCTURACIÓN:\n"
-        "1. Identifica la 'rama' (una de estas: 1_Manuales_tecnicos, 2_Ecosistema_software, 3_Archivo_historico, 4_Protocolos_unidad).\n"
-        "2. Identifica el 'subnodo' (sistema o emulador en minúsculas y sin espacios, ej: batocera).\n"
-        "3. Dentro del objeto 'datos', NO te limites a un solo campo de texto. Crea claves dinámicas según la información disponible "
-        "para segmentar todo sin resumir (ej: 'Descripcion', 'Calibracion_Hardware', 'Emuladores_Soportados', 'FAQ', 'Solucion_Problemas').\n"
-        "4. En los campos 'imagenes_esquema' y 'videos_tutorial', utiliza EXCLUSIVAMENTE los enlaces reales provistos en los listados del usuario. "
-        "Si un enlace está incompleto o no hay, deja el array vacío. Está prohibido inventar URLs.\n\n"
-        "Responde EXCLUSIVAMENTE con el objeto JSON puro con esta forma jerárquica:\n"
+        "Actúa como el Editor Jefe y Analista de Datos de la Enciclopedia S-2. Tu único objetivo es procesar la nueva información técnica "
+        "y los arrays multimedia provistos, y fusionarlos de manera incremental con el conocimiento histórico ya existente sin destruir nada.\n\n"
+        "REGLAS ESTRATÉGICAS DE FUSIÓN (MERGE):\n"
+        "1. Mantén la 'rama' y el 'subnodo' consistentes con el destino indicado.\n"
+        "2. Estructura el objeto 'datos' utilizando de manera fija y exclusiva estas cinco secciones estructurales:\n"
+        "   - 'Descripcion': Explicación completa e introductoria del sistema o emulador.\n"
+        "   - 'Calibracion_Hardware': Protocolos de botones, alineación IR, pasos específicos por modelo de Lightgun.\n"
+        "   - 'Emuladores_Soportados': Cores, configuraciones, emuladores compatibles y archivos del sistema.\n"
+        "   - 'FAQ': Banco de preguntas y respuestas recopiladas.\n"
+        "   - 'Resolucion_Problemas': Fallos en pantalla, pérdida de tracking, bugs conocidos y parches técnicos.\n"
+        "3. LÓGICA EVOLUTIVA: No borres datos antiguos. Si una sección ya tiene texto e ingresa información nueva, haz un 'merge': combina "
+        "ambos bloques redactando un manual unificado más extenso, detallado y jerarquizado. Si la información entrante es idéntica o desactualizada, "
+        "prioriza los datos más recientes y precisos. El objetivo final es que cada sección acumule conocimiento.\n"
+        "4. MULTIMEDIA BLINDADA: Combina las listas de 'imagenes_esquema' y 'videos_tutorial' preexistentes con las nuevas detectadas. Elimina duplicados exactos. "
+        "Usa exclusivamente las URLs completas del reporte. Prohibido inventar o alucinar enlaces.\n\n"
+        "Responde EXCLUSIVAMENTE con el objeto JSON estructurado de este modo (sin delimitadores markdown de código):\n"
         "{\n"
-        "  \"rama\": \"Nombre_de_la_rama\",\n"
-        "  \"subnodo\": \"Nombre_del_subnodo\",\n"
+        "  \"rama\": \"Rama_Identificada\",\n"
+        "  \"subnodo\": \"subnodo_identificado\",\n"
         "  \"datos\": {\n"
-        "    \"Seccion_1\": \"Contenido masivo y detallado sin omitir nada...\",\n"
-        "    \"Seccion_2\": \"Contenido masivo...\",\n"
-        "    \"imagenes_esquema\": [\"URLs reales extraídas\"],\n"
-        "    \"videos_tutorial\": [\"URLs reales extraídas\"]\n"
+        "    \"Descripcion\": \"...\",\n"
+        "    \"Calibracion_Hardware\": \"...\",\n"
+        "    \"Emuladores_Soportados\": \"...\",\n"
+        "    \"FAQ\": \"...\",\n"
+        "    \"Resolucion_Problemas\": \"...\",\n"
+        "    \"imagenes_esquema\": [\"URLs\"],\n"
+        "    \"videos_tutorial\": [\"URLs\"]\n"
         "  }\n"
         "}\n"
-        "No incluyas introducciones ni bloques de código markdown."
     )
 
     try:
@@ -213,18 +239,18 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         
         objeto_datos = json.loads(resultado_raw.strip())
         
-        rama = objeto_datos.get("rama")
-        subnodo = objeto_datos.get("subnodo")
+        rama = objeto_datos.get("rama", rama_detectada)
+        subnodo = objeto_datos.get("subnodo", subnodo_detectado)
         payload = objeto_datos.get("datos")
         payload["ultima_modificacion"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         payload["modificado_por"] = username
 
-        # Inyección directa
+        # Inyección dinámica mediante actualización parcial combinada
         ref = db.reference(f'Enciclopedia_S2/{rama}/{subnodo}')
         ref.update(payload)
         
         prefijo_rango = "Comandante" if username.lower() == "@carlosfservan" else "Sargento"
-        return f"[{canal_usado}]\n\n{prefijo_rango}, toda la información técnica fue clasificada e inyectada dinámicamente con éxito en 'Enciclopedia_S2/{rama}/{subnodo}'."
+        return f"[{canal_usado}]\n\n{prefijo_rango}, la base de datos ha asimilado la información de forma incremental. El manual de '{rama}/{subnodo}' ha sido fusionado y expandido sin pérdidas en los archivos históricos."
         
     except Exception as err:
         return f"Error en el sistema de ingesta táctica en cascada: {str(err)}. Transmisión abortada."
