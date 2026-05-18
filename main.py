@@ -34,21 +34,51 @@ if firebase_creds_json:
     except Exception as e:
         print(f"❌ Error crítico al inicializar Firebase: {e}")
 
-def obtener_datos_enciclopedia():
-    """Recupera toda la sabiduría almacenada para dar contexto a la IA"""
+def obtener_contexto_inteligente(mensaje_usuario: str) -> str:
+    """Busca en Firebase de forma selectiva para evitar la saturación de tokens por volumen masivo."""
     try:
-        ref = db.reference('Enciclopedia_S2')
-        datos = ref.get()
-        if not datos:
+        ref_raiz = db.reference('Enciclopedia_S2')
+        estructura_completa = ref_raiz.get()
+        
+        if not estructura_completa:
             return "No hay datos registrados en la enciclopedia aún."
         
-        contexto = "\n--- DATOS REALES RECUPERADOS DE FIREBASE (ENCICLOPEDIA S-2) ---\n"
-        contexto += json.dumps(datos, indent=2, ensure_ascii=False)
-        contexto += "\n--- FIN DE LOS DATOS REALES ---\n"
-        return contexto
+        mensaje_min = mensaje_usuario.lower()
+        subnodos_encontrados = {}
+        
+        # Escaneo táctico de ramas y subnodos buscando coincidencias de palabras clave
+        for rama, subnodos in estructura_completa.items():
+            if isinstance(subnodos, dict):
+                for subnodo, contenido in subnodos.items():
+                    # Si el usuario menciona el nombre del subnodo (ej: 'batocera', 'wikipedia_lightgun')
+                    if subnodo.lower() in mensaje_min or subnodo.replace("_", "") in mensaje_min:
+                        if rama not in subnodos_encontrados:
+                            subnodos_encontrados[rama] = {}
+                        subnodos_encontrados[rama][subnodo] = contenido
+
+        if subnodos_encontrados:
+            contexto = "\n--- DATOS ESPECÍFICOS RECUPERADOS (COINCIDENCIA DETECTADA) ---\n"
+            contexto += json.dumps(subnodos_encontrados, indent=2, ensure_ascii=False)
+            contexto += "\n--- FIN DE LOS DATOS RELEVANTES ---\n"
+            return contexto
+            
+        # Si no hay coincidencia, solo enviamos el mapa taxonómico (el índice de lo que sabemos)
+        mapa_conocimiento = {}
+        for rama, subnodos in estructura_completa.items():
+            if isinstance(subnodos, dict):
+                mapa_conocimiento[rama] = list(subnodos.keys())
+            else:
+                mapa_conocimiento[rama] = "Nodo vacío"
+                
+        contexto_ligero = "\n--- ÍNDICE DE CONTENIDOS DISPONIBLES EN S-2 ---\n"
+        contexto_ligero += f"Actualmente posees información guardada sobre estos sistemas: {json.dumps(mapa_conocimiento, ensure_ascii=False)}\n"
+        contexto_ligero += "Si el usuario pregunta por algo que NO está en esta lista, infórmale con disciplina de que el archivo no está indexado y que requiere el comando /guardar.\n"
+        contexto_ligero += "----------------------------------------------\n"
+        return contexto_ligero
+
     except Exception as e:
-        print(f"Error leyendo base de datos: {e}")
-        return ""
+        print(f"Error en filtro analítico de contexto: {e}")
+        return "Error limitador al recuperar contexto real."
 
 # --- 2. CONFIGURACIÓN DEL SERVIDOR WEB ---
 app = Flask(__name__)
@@ -216,7 +246,6 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
 
     try:
         indice_raw, canal_indexador = ejecutar_ia_con_cascada(prompt_indexador, contenido_web)
-        # Limpieza de cualquier residuo sintáctico de la IA
         indice_raw = re.sub(r'[`\s\n]', '', indice_raw)
         categorias = [cat.strip() for cat in indice_raw.split(",") if cat.strip()]
         if not categorias:
@@ -231,7 +260,6 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     payload_acumulado = {}
     canales_utilizados = []
     
-    # Extraer arrays multimedia nativos del reporte web
     urls_en_texto = re.findall(r'\"(https?://[^\s"]+)\"', contenido_web)
     nuevas_img = [u for u in urls_en_texto if any(ext in u.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])]
     nuevos_vid = [u for u in urls_en_texto if 'youtube.com' in u.lower() or 'youtu.be' in u.lower()]
@@ -252,7 +280,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
             f"1. Haz un 'merge' inteligente: Redacta un manual unificado, extenso, técnico, jerarquizado y más detallado combinando el conocimiento histórico con los nuevos datos entrantes.\n"
             f"2. Si la web entrante no aporta nada nuevo o útil para la sección '{categoria}', mantén íntegro e intacto el texto histórico que se te ha provisto.\n"
             f"3. No inventes configuraciones, mantén la precisión analítica absoluta.\n"
-            f"4. Responde ÚNICAMENTE con el desarrollo de texto de la sección unificada, sin etiquetas del formato anterior, sin bloques de código ```json o ```markdown, y sin comentarios editoriales externos."
+            f"4. Responde ÚNICAMENTE con el desarrollo de texto de la sección unificada, sin etiquetas del formato anterior, sin bloques de código ```json o ```markdown, and sin comentarios editoriales externos."
         )
 
         try:
@@ -260,19 +288,16 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
             payload_acumulado[categoria] = texto_fusionado.strip()
             if canal_oleada not in canales_utilizados:
                 canales_utilizados.append(canal_oleada)
-            # Retraso táctico anti-saturación de Rate Limits (RPM) en la API
             time.sleep(0.5)
         except Exception as err_oleada:
             print(f"Error procesando la oleada {categoria}: {err_oleada}")
             payload_acumulado[categoria] = texto_historico_categoria
 
-    # Combinación y limpieza estricta de metadatos multimedia
     img_historicas = datos_existentes.get("imagenes_esquema", [])
     vid_historicos = datos_existentes.get("videos_tutorial", [])
     img_finales = list(dict.fromkeys(img_historicas + nuevas_img))
     vid_finales = list(dict.fromkeys(vid_historicos + nuevos_vid))
 
-    # Construcción final del payload simétrico asimilado
     payload_final = {**payload_acumulado}
     payload_final["imagenes_esquema"] = img_finales
     payload_final["videos_tutorial"] = vid_finales
@@ -280,7 +305,6 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
     payload_final["modificado_por"] = username
 
     try:
-        # Inyección atómica directa en Firebase Realtime Database
         ref = db.reference(f'Enciclopedia_S2/{rama_detectada}/{subnodo_detectado}')
         ref.update(payload_final)
         
@@ -292,7 +316,6 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
             f"({', '.join(categorias)}). La información ha sido procesada por oleadas y fusionada de manera incremental en "
             f"'{rama_detectada}/{subnodo_detectado}' sin pérdidas sintácticas ni saturación de memoria."
         )
-        
     except Exception as err:
         return f"Error crítico al inyectar el payload consolidado en Firebase: {str(err)}. Transmisión abortada."
 
@@ -331,7 +354,8 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"------------------------------------\n"
     )
 
-    contexto_real = obtener_datos_enciclopedia()
+    # Llamada al nuevo extractor selectivo inteligente para mitigar desbordamientos
+    contexto_real = obtener_contexto_inteligente(mensaje_usuario)
     instrucciones_completas = f"{instrucciones_base}\n{contexto_situacional}\n{contexto_real}"
 
     # --- PLAN A: GROQ ---
@@ -347,7 +371,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"[Canal Alpha - Groq]\n\n{respuesta}")
             return
     except Exception as e:
-        print(f"⚠️ PLAN A FALLIDO: {e}")
+        print(f"⚠️ PLAN A FALLIDO (Consulta): {e}")
 
     # --- PLAN B: MISTRAL ---
     if MISTRAL_API_KEY:
@@ -361,7 +385,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"[Canal Bravo - Mistral]\n\n{res_mistral.choices[0].message.content}")
             return
         except Exception as e2:
-            print(f"⚠️ PLAN B FALLIDO: {e2}")
+            print(f"⚠️ PLAN B FALLIDO (Consulta): {e2}")
 
     # --- PLAN C: DEEPSEEK ---
     if DEEPSEEK_API_KEY:
@@ -375,9 +399,9 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"[Canal Charlie - DeepSeek]\n\n{res_ds.choices[0].message.content}")
             return
         except Exception as e3:
-            print(f"⚠️ PLAN C FALLIDO: {e3}")
+            print(f"⚠️ PLAN C FALLIDO (Consulta): {e3}")
 
-    await update.message.reply_text("❌ INTERFERENCIA: Todos los canales de inteligencia están caídos.")
+    await update.message.reply_text("❌ INTERFERENCIA: Todos los canales de inteligencia están caídos debido a desbordamiento.")
 
 # --- 6. LANZAMIENTO ---
 def main():
