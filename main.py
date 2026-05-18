@@ -6,6 +6,7 @@ import json
 import re
 import random
 from datetime import datetime, time as datetime_time
+import asyncio  # Inyectado para control asíncrono de tareas en callbacks
 from flask import Flask
 from telegram import Update
 from telegram.ext import (
@@ -195,13 +196,20 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_callback:
         user = update.callback_query.from_user
         msg_obj = update.callback_query.message
-        mensaje_usuario = msg_obj.text.strip() if msg_obj.text else ""
+        # Evitamos leer el texto del mensaje previo del bot, usamos directamente la variable forzada de contexto
+        mensaje_usuario = context.user_data.get("forzar_subnodo", "").strip()
+        
+        # Blindaje crítico: Confirmamos acuse de recibo a Telegram inmediatamente para desbloquear el botón
+        try:
+            await update.callback_query.answer()
+        except Exception as e:
+            print(f"Aviso: Callback ya respondido o expirado: {e}")
     else:
         if not update.message or not update.message.text:
             return
         user = update.message.from_user
         msg_obj = update.message
-        mensaje_usuario = msg_obj.text.strip()
+        mensaje_usuario = update.message.text.strip()
 
     username = f"@{user.username}" if user.username else user.first_name
 
@@ -230,8 +238,8 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ANALIZADOR DE CONTEXTO REAL EN FIREBASE
-    if "forzar_subnodo" in context.user_data:
-        subnodo_elegido = context.user_data.pop("forzar_subnodo")
+    if "forzar_subnodo" in context.user_data or is_callback:
+        subnodo_elegido = context.user_data.pop("forzar_subnodo", mensaje_usuario)
         from firebase_admin import db
         mapa = database.obtener_mapa_superficial()
         rama_objetivo = next((r for r, subs in mapa.items() if subnodo_elegido in subs), "1_Manuales_tecnicos")
@@ -250,18 +258,26 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             contexto_real, coincidencia = "", False
 
-    # SI NO HAY COINCIDENCIA, SE DISPARA LA INTERFAZ INTERACTIVA
+    # SI NO HAY COINCIDENCIA, SE DISPARA LA INTERFAZ INTERACTIVA (Excluyendo llamadas de botones activos)
     if not coincidencia or mensaje_usuario.lower() in ["ayuda", "/ayuda", "menu", "menú"]:
-        await menus.activar_encuesta_indice(update, context, mensaje_usuario)
+        if not is_callback:
+            await menus.activar_encuesta_indice(update, context, mensaje_usuario)
         return
 
     # FLUJO SEGURO DE IA EN CASCADA
     try:
         respuesta, canal = ai_cascade.procesar_consulta_directa(mensaje_usuario, contexto_real, username)
-        await msg_obj.reply_text(f"[{canal}]\n\n{respuesta}")
+        if is_callback:
+            await context.bot.send_message(chat_id=msg_obj.chat_id, text=f"[{canal}]\n\n{respuesta}")
+        else:
+            await msg_obj.reply_text(f"[{canal}]\n\n{respuesta}")
     except Exception as e:
         print(f"❌ Error crítico en cascada de IA: {e}")
-        await msg_obj.reply_text("❌ INTERFERENCIA: Todos los canales de inteligencia están caídos debido a desbordamiento.")
+        error_msg = "❌ INTERFERENCIA: Todos los canales de inteligencia están caídos debido a desbordamiento."
+        if is_callback:
+            await context.bot.send_message(chat_id=msg_obj.chat_id, text=error_msg)
+        else:
+            await msg_obj.reply_text(error_msg)
 
 # --- 3.5 TRANSMISOR AUTOMÁTICO DE ANÉCDOTAS (3 VECES POR SEMANA) ---
 async def transmitir_anecdota_automatica(context: ContextTypes.DEFAULT_TYPE):
@@ -310,8 +326,6 @@ async def transmitir_anecdota_automatica(context: ContextTypes.DEFAULT_TYPE):
 
 # --- 4. LANZAMIENTO Y CONFIGURACIÓN DEL BOT ---
 def main():
-    import asyncio
-    
     if not ai_cascade.TELEGRAM_TOKEN:
         print("❌ [CRÍTICO] Falta TELEGRAM_TOKEN. Abortando misión.")
         return
@@ -349,7 +363,10 @@ def main():
         
         # CONFIGURACIÓN DEL CONTROLADOR DE CONVERSACIONES NATIVO (FSM)
         manejador_encuesta = ConversationHandler(
-            entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje)],
+            entry_points=[
+                MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje),
+                CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^rama:")
+            ],
             states={
                 menus.ESTADO_RAMA: [CallbackQueryHandler(menus.procesar_seleccion_rama)],
                 menus.ESTADO_SUBNODO: [CallbackQueryHandler(menus.procesar_seleccion_subnodo)]
@@ -360,6 +377,8 @@ def main():
         
         # Registramos los manejadores maestros
         application.add_handler(manejador_encuesta)
+        application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^rama:"))
+        application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_subnodo, pattern="^subnodo:"))
         application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
 
         print("🚀 Oficial S-2 modularizado y blindado en línea. ¡Escuchando transmisiones!")
