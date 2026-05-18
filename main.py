@@ -411,7 +411,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Por favor, responda con el número asignado a la sección.")
             return
 
-    # ACTIVADOR DE LA ENCUESTA (Si no hay coincidencia exacta o pide ayuda)
+    # ACTIVADOR DE LA ENCUESTA (Si no hay coincidencia exacta o pide ayuda de forma explícita)
     if not coincidencia or mensaje_usuario.lower() in ["ayuda", "/ayuda", "ayudame", "menú", "menu"]:
         context.user_data['encuesta_paso'] = 'esperando_rama'
         
@@ -425,7 +425,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         menu_principal += "\n💡 *O responda 'cancelar' en cualquier momento para salir.*"
         await update.message.reply_text(menu_principal, parse_mode="Markdown")
-        return
+        return  # <-- PARCHE CRÍTICO: Detiene la ejecución aquí para que NO salte a las IAs inferiores.
 
     # ==========================================
     # FLUJO NORMAL CON IA SI COINCIDE EL ARCHIVO
