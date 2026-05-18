@@ -1,8 +1,8 @@
-python-telegram-bot
-flask
-groq
+python-telegram-bot[webhooks]==21.1.1
+Flask==3.0.3
+groq==0.5.0
 mistralai==1.1.0
-openai
-firebase-admin
+openai==1.23.0
+firebase-admin==6.5.0
 beautifulsoup4==4.12.3
 requests==2.31.0
