@@ -35,50 +35,60 @@ if firebase_creds_json:
         print(f"❌ Error crítico al inicializar Firebase: {e}")
 
 def obtener_contexto_inteligente(mensaje_usuario: str) -> str:
-    """Busca en Firebase de forma selectiva para evitar la saturación de tokens por volumen masivo."""
+    """Busca de forma ultra-ligera en Firebase usando shallow=True para evitar descargas masivas."""
     try:
         ref_raiz = db.reference('Enciclopedia_S2')
-        estructura_completa = ref_raiz.get()
+        # shallow=True descarga SOLO las claves de primer nivel (Ramas) sin sus contenidos
+        ramas_claves = ref_raiz.get(shallow=True)
         
-        if not estructura_completa:
+        if not ramas_claves:
             return "No hay datos registrados en la enciclopedia aún."
         
         mensaje_min = mensaje_usuario.lower()
-        subnodos_encontrados = {}
-        
-        # Escaneo táctico de ramas y subnodos buscando coincidencias de palabras clave
-        for rama, subnodos in estructura_completa.items():
-            if isinstance(subnodos, dict):
-                for subnodo, contenido in subnodos.items():
-                    # Si el usuario menciona el nombre del subnodo (ej: 'batocera', 'wikipedia_lightgun')
-                    if subnodo.lower() in mensaje_min or subnodo.replace("_", "") in mensaje_min:
-                        if rama not in subnodos_encontrados:
-                            subnodos_encontrados[rama] = {}
-                        subnodos_encontrados[rama][subnodo] = contenido
+        mapa_conocimiento = {}
+        subnodo_objetivo = None
+        rama_objetivo = None
 
-        if subnodos_encontrados:
-            contexto = "\n--- DATOS ESPECÍFICOS RECUPERADOS (COINCIDENCIA DETECTADA) ---\n"
-            contexto += json.dumps(subnodos_encontrados, indent=2, ensure_ascii=False)
-            contexto += "\n--- FIN DE LOS DATOS RELEVANTES ---\n"
+        # Fase 1: Mapear la estructura superficial de subnodos de forma ultra-rápida
+        for rama in ramas_claves.keys():
+            ref_subnodos = db.reference(f'Enciclopedia_S2/{rama}')
+            # Volvemos a usar shallow=True para obtener solo los nombres de los subnodos
+            subnodos_claves = ref_subnodos.get(shallow=True)
+            
+            if subnodos_claves and isinstance(subnodos_claves, dict):
+                lista_subnodos = list(subnodos_claves.keys())
+                mapa_conocimiento[rama] = lista_subnodos
+                
+                # Verificar si el usuario menciona algún subnodo guardado
+                for subnodo in lista_subnodos:
+                    if subnodo.lower() in mensaje_min or subnodo.replace("_", "") in mensaje_min:
+                        subnodo_objetivo = subnodo
+                        rama_objetivo = rama
+            else:
+                mapa_conocimiento[rama] = []
+
+        # Fase 2: Descargar de Firebase ÚNICAMENTE el subnodo solicitado si hay coincidencia
+        if subnodo_objetivo and rama_objetivo:
+            ref_especifica = db.reference(f'Enciclopedia_S2/{rama_objetivo}/{subnodo_objetivo}')
+            datos_subnodo = ref_especifica.get() # Aquí sí descargamos el contenido, pero solo de ESTE subnodo
+            
+            contexto = "\n--- DATOS REALES EXTRAÍDOS DE LA ENCICLOPEDIA (COINCIDENCIA DETECTADA) ---\n"
+            contexto += f"RAMA: {rama_objetivo} | SUBNODO: {subnodo_objetivo}\n"
+            contexto += json.dumps(datos_subnodo, indent=2, ensure_ascii=False)
+            contexto += "\n--- FIN DE LOS DATOS REALES RECUPERADOS ---\n"
             return contexto
             
-        # Si no hay coincidencia, solo enviamos el mapa taxonómico (el índice de lo que sabemos)
-        mapa_conocimiento = {}
-        for rama, subnodos in estructura_completa.items():
-            if isinstance(subnodos, dict):
-                mapa_conocimiento[rama] = list(subnodos.keys())
-            else:
-                mapa_conocimiento[rama] = "Nodo vacío"
-                
-        contexto_ligero = "\n--- ÍNDICE DE CONTENIDOS DISPONIBLES EN S-2 ---\n"
-        contexto_ligero += f"Actualmente posees información guardada sobre estos sistemas: {json.dumps(mapa_conocimiento, ensure_ascii=False)}\n"
-        contexto_ligero += "Si el usuario pregunta por algo que NO está en esta lista, infórmale con disciplina de que el archivo no está indexado y que requiere el comando /guardar.\n"
-        contexto_ligero += "----------------------------------------------\n"
+        # Si no hay coincidencia, enviamos el mapa taxonómico ligero a la IA
+        contexto_ligero = "\n--- ÍNDICE DE CONTENIDOS DISPONIBLES EN EL OFICIAL S-2 ---\n"
+        contexto_ligero += f"Sistemas indexados actualmente: {json.dumps(mapa_conocimiento, ensure_ascii=False)}\n"
+        contexto_ligero += "REGLA OPERATIVA: El usuario está preguntando por un sistema que NO tienes en tu base de datos real.\n"
+        contexto_ligero += "Infórmale con disciplina militar de que esos datos no constan en tus archivos de inteligencia y que requiere realizar una ingesta usando el comando /guardar.\n"
+        contexto_ligero += "--------------------------------------------------------\n"
         return contexto_ligero
 
     except Exception as e:
-        print(f"Error en filtro analítico de contexto: {e}")
-        return "Error limitador al recuperar contexto real."
+        print(f"Error crítico en filtro analítico de contexto: {e}")
+        return "Error limitador al recuperar contexto real por saturación."
 
 # --- 2. CONFIGURACIÓN DEL SERVIDOR WEB ---
 app = Flask(__name__)
