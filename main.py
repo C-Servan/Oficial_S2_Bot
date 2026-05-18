@@ -190,21 +190,25 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
 
 # --- 3. PROCESADOR PRINCIPAL DE MENSAJES E INTEGRACIÓN DE IA ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Soporte polimórfico: Maneja tanto mensajes directos como redirecciones de CallbackQueries de botones
+    # Soporte polimórfico total
     is_callback = update.callback_query is not None
     destino_chat_id = update.effective_chat.id
     
     if is_callback:
         user = update.callback_query.from_user
         msg_obj = update.callback_query.message
-        # Evitamos leer el texto del mensaje previo del bot, usamos directamente la variable forzada de contexto
-        mensaje_usuario = context.user_data.get("forzar_subnodo", "").strip()
         
-        # Blindaje crítico: Confirmamos acuse de recibo a Telegram inmediatamente para desbloquear el botón
+        # Leemos el subnodo desde los datos del callback si no está en user_data
+        mensaje_usuario = context.user_data.get("forzar_subnodo", "")
+        if not mensaje_usuario and update.callback_query.data:
+            mensaje_usuario = update.callback_query.data.replace("subnodo:", "")
+            
+        mensaje_usuario = mensaje_usuario.strip()
+        
         try:
             await update.callback_query.answer()
         except Exception as e:
-            print(f"Aviso: Callback ya respondido o expirado: {e}")
+            print(f"Aviso: Callback ya respondido: {e}")
     else:
         if not update.message or not update.message.text:
             return
@@ -214,7 +218,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     username = f"@{user.username}" if user.username else user.first_name
 
-    # INTERCEPTOR DE COMANDO /GUARDAR (Exclusivo para mensajes directos de texto)
+    # INTERCEPTOR DE COMANDO /GUARDAR
     if not is_callback and mensaje_usuario.startswith("/guardar"):
         resultado_guardado = ejecutar_ingesta_base_datos(username, mensaje_usuario)
         await msg_obj.reply_text(f"{resultado_guardado}\n\nCambio y corto. ¡RELOAD!")
@@ -238,7 +242,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await transmitir_anecdota_automatica(context)
         return
 
-    # PRIORIDAD CRÍTICA: SI EL USUARIO PIDE AYUDA O MENÚ, LIMPIAMOS CUALQUIER RESIDUO DE MEMORIA
+    # PRIORIDAD CRÍTICA: LIMPIEZA DE RESIDUOS AL PEDIR MENÚ
     if mensaje_usuario.lower() in ["ayuda", "/ayuda", "menu", "menú"]:
         context.user_data.pop("forzar_subnodo", None)
         if not is_callback:
@@ -246,8 +250,11 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ANALIZADOR DE CONTEXTO REAL EN FIREBASE
-    if "forzar_subnodo" in context.user_data or is_callback:
-        subnodo_elegido = context.user_data.pop("forzar_subnodo", mensaje_usuario)
+    subnodo_elegido = mensaje_usuario
+    if "forzar_subnodo" in context.user_data:
+        subnodo_elegido = context.user_data.pop("forzar_subnodo")
+        
+    if is_callback or subnodo_elegido:
         from firebase_admin import db
         mapa = database.obtener_mapa_superficial()
         rama_objetivo = next((r for r, subs in mapa.items() if subnodo_elegido in subs), "1_Manuales_tecnicos")
@@ -255,14 +262,17 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ref_especifica = db.reference(f'Enciclopedia_S2/{rama_objetivo}/{subnodo_elegido}')
         datos_nodo = ref_especifica.get()
         
-        contexto_real = f"\n--- DATOS REALES EXTRAÍDOS DE LA ENCICLOPEDIA ---\nRAMA: {rama_objetivo} | SUBNODO: {subnodo_elegido}\n{json.dumps(datos_nodo, indent=2, ensure_ascii=False)}\n"
-        coincidencia = True
+        if datos_nodo:
+            contexto_real = f"\n--- DATOS REALES EXTRAÍDOS DE LA ENCICLOPEDIA ---\nRAMA: {rama_objetivo} | SUBNODO: {subnodo_elegido}\n{json.dumps(datos_nodo, indent=2, ensure_ascii=False)}\n"
+            coincidencia = True
+        else:
+            contexto_real, coincidencia = "", False
     else:
-        # Búsqueda tradicional en texto libre
         datos_nodo, rama_obj, sub_obj = database.buscar_coincidencia_exacta(mensaje_usuario)
         if datos_nodo:
             contexto_real = f"\n--- DATOS REALES EXTRAÍDOS DE LA ENCICLOPEDIA ---\nRAMA: {rama_obj} | SUBNODO: {sub_obj}\n{json.dumps(datos_nodo, indent=2, ensure_ascii=False)}\n"
             coincidencia = True
+            subnodo_elegido = sub_obj
         else:
             contexto_real, coincidencia = "", False
 
@@ -272,10 +282,10 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await menus.activar_encuesta_indice(update, context, mensaje_usuario)
         return
 
-    # FLUJO SEGURO DE IA EN CASCADA
+    # FLUJO SEGURO DE IA EN CASCADA (EJECUCIÓN INMEDIATA)
     try:
-        print(f"🤖 [S-2] Enviando consulta a la cascada de IA para el subnodo: {mensaje_usuario}")
-        respuesta, canal = ai_cascade.procesar_consulta_directa(mensaje_usuario, contexto_real, username)
+        print(f"🤖 [S-2] Procesando inmediatamente el reporte técnico para: {subnodo_elegido}")
+        respuesta, canal = ai_cascade.procesar_consulta_directa(subnodo_elegido, contexto_real, username)
         
         if respuesta and respuesta.strip():
             await context.bot.send_message(chat_id=destino_chat_id, text=f"[{canal}]\n\n{respuesta}")
@@ -288,55 +298,48 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"❌ Error crítico en cascada de IA: {e}")
         error_msg = (
             f"❌ **INTERFERENCIA S-2**\n"
-            f"No se ha podido procesar el reporte de [ {mensaje_usuario.upper()} ].\n"
-            f"Causa técnica: Los servidores de la IA externa (Groq/Mistral) han rechazado la solicitud o se ha agotado el tiempo de espera."
+            f"No se ha podido procesar el reporte de [ {subnodo_elegido.upper()} ].\n"
+            f"Causa técnica: Fallo de respuesta en los servidores de Inteligencia."
         )
         await context.bot.send_message(chat_id=destino_chat_id, text=error_msg)
 
-# --- 3.5 TRANSMISOR AUTOMÁTICO DE ANÉCDOTAS (3 VECES POR SEMANA) ---
+    # Si veníamos de una conversación activa, la cerramos limpiamente para no bloquear futuros inputs
+    if not is_callback:
+        return ConversationHandler.END
+
+# --- 3.5 TRANSMISOR AUTOMÁTICO DE ANÉCDOTAS ---
 async def transmitir_anecdota_automatica(context: ContextTypes.DEFAULT_TYPE):
-    """Extrae una pieza aleatoria del nodo histórico '3_Archivo_historico' de Firebase y la difunde."""
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not chat_id:
-        print("⚠️ [PLANIFICADOR] Omitiendo envío: No se ha configurado la variable TELEGRAM_CHAT_ID en Render.")
         return
-
     try:
         from firebase_admin import db
         ref_historica = db.reference('Enciclopedia_S2/3_Archivo_historico')
         archivo = ref_historica.get()
-        
         if not archivo:
-            print("⚠️ [PLANIFICADOR] Rama '3_Archivo_historico' vacía en Firebase.")
             return
-            
         subnodos_disponibles = list(archivo.keys())
         subnodo_elegido = random.choice(subnodos_disponibles)
         datos_raw = archivo[subnodo_elegido]
         
         prompt_redaccion = (
             "Actúas como el Oficial de Inteligencia S-2. Tu misión es redactar un despacho informativo corto, "
-            "interesante y sumamente táctico para la unidad, basado en los datos de curiosidades/anécdotas provistos.\n"
-            "Comienza estrictamente con: '📢 DESPACHO DE INTELIGENCIA HISTÓRICA S-2'\n"
-            "Mantén tu tono seco, veterano y disciplined. Termina con tu firma reglamentaria: Cambio y corto. ¡RELOAD!"
+            "interesante y sumamente táctico para la unidad. Comienza con: '📢 DESPACHO DE INTELIGENCIA HISTÓRICA S-2'\n"
+            "Termina con: Cambio y corto. ¡RELOAD!"
         )
-        
         contexto_datos = f"SUBTEMA: {subnodo_elegido}\nDATOS: {json.dumps(datos_raw, ensure_ascii=False)}"
         despacho_final, canal = ai_cascade.ejecutar_ia_con_cascada(prompt_redaccion, contexto_datos)
         
         imagenes = datos_raw.get("imagenes_esquema", [])
         videos = datos_raw.get("videos_tutorial", [])
-        
-        if imagenes and isinstance(imagenes, list) and len(imagenes) > 0:
+        if imagenes and len(imagenes) > 0:
             despacho_final += f"\n\n📷 Archivo visual histórico: {imagenes[0]}"
-        if videos and isinstance(videos, list) and len(videos) > 0:
+        if videos and len(videos) > 0:
             despacho_final += f"\n\n🎥 Registro audiovisual complementario: {videos[0]}"
 
         await context.bot.send_message(chat_id=chat_id, text=despacho_final)
-        print(f"✅ [PLANIFICADOR] Despacho histórico enviado con éxito sobre: {subnodo_elegido}.")
-        
     except Exception as e:
-        print(f"❌ [PLANIFICADOR] Error en la ejecución del despacho automático: {e}")
+        print(f"❌ [PLANIFICADOR] Error: {e}")
 
 # --- 4. LANZAMIENTO Y CONFIGURACIÓN DEL BOT ---
 def main():
@@ -344,19 +347,16 @@ def main():
         print("❌ [CRÍTICO] Falta TELEGRAM_TOKEN. Abortando misión.")
         return
 
-    # 1. Forzar e inicializar un loop de eventos asíncronos limpio en el hilo principal
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    # 2. Lanzamos el servidor web Flask en su propio hilo secundario para Render
     print("📡 Iniciando servidor web de telemetría...")
     threading.Thread(target=run_flask, daemon=True).start()
 
     try:
-        # 3. Construimos la aplicación ampliando el pool de timeouts e inyectando soporte para JobQueue
         application = (
             Application.builder()
             .token(ai_cascade.TELEGRAM_TOKEN)
@@ -367,19 +367,15 @@ def main():
             .build()
         )
         
-        # PROGRAMACIÓN DEL CRONOGRAMA DE ANÉCDOTAS (Lunes, Miércoles y Viernes a las 12:00 PM)
         job_queue = application.job_queue
         if job_queue:
             job_queue.run_daily(transmitir_anecdota_automatica, time=datetime_time(12, 0, 0), days=(0,))
             job_queue.run_daily(transmitir_anecdota_automatica, time=datetime_time(12, 0, 0), days=(2,))
             job_queue.run_daily(transmitir_anecdota_automatica, time=datetime_time(12, 0, 0), days=(4,))
-            print("📅 [SISTEMA] Cronograma de transmisiones históricas establecido (Lun, Mié, Vie).")
         
-        # CONFIGURACIÓN DEL CONTROLADOR DE CONVERSACIONES NATIVO (FSM)
         manejador_encuesta = ConversationHandler(
             entry_points=[
-                MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje),
-                CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^rama:")
+                MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje)
             ],
             states={
                 menus.ESTADO_RAMA: [CallbackQueryHandler(menus.procesar_seleccion_rama)],
@@ -389,15 +385,17 @@ def main():
             allow_reentry=True
         )
         
-        # Registramos los manejadores maestros
-        application.add_handler(manejador_encuesta)
+        # PRIORIDAD CRÍTICA REESTRUCTURADA: Registramos los Callbacks de los botones ANTES de la conversación
+        # Esto hace que Telegram ejecute los clics inmediatamente sin caer en la trampa del bucle de espera de texto.
+        application.add_handler(CallbackQueryHandler(procesar_mensaje, pattern="^subnodo:"))
         application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^rama:"))
-        application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_subnodo, pattern="^subnodo:"))
+        application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_subnodo, pattern="^subnodo_menu:"))
+        
+        # Luego registramos la máquina de estados de texto
+        application.add_handler(manejador_encuesta)
         application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
 
         print("🚀 Oficial S-2 modularizado y blindado en línea. ¡Escuchando transmisiones!")
-        
-        # 4. run_polling bloquea el hilo principal y limpia las actualizaciones pendientes al iniciar
         application.run_polling(drop_pending_updates=True)
         
     except Exception as e:
