@@ -6,10 +6,10 @@ import database
 # Definición estricta de los estados de la conversación
 ESTADO_RAMA, ESTADO_SUBNODO = range(2)
 
-# DICCIONARIO TÁCTICO: Oculta la estructura interna de Firebase y muestra un diseño limpio
+# DICCIONARIO TÁCTICO: Títulos optimizados en longitud para evitar cortes y forzar centrado visual
 MAPEO_TACTICO = {
-    "1_Manuales_tecnicos": "⚙️ CONFIGURACIÓN DE SISTEMAS Y LIGHT GUNS",
-    "2_Ecosistema_software": "🎮 EMULADORES Y ENTORNOS DE JUEGO",
+    "1_Manuales_tecnicos": "⚙️ CONFIG. SISTEMAS / LIGHT GUNS",
+    "2_Ecosistema_software": "🎮 EMULADORES Y SOFTWARE",
     # Las ramas "3_Archivo_historico" y "4_Protocolos_unidad" quedan capadas automáticamente al no incluirse aquí
 }
 
@@ -34,9 +34,9 @@ def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
     teclado = []
     
     for subnodo in sorted(subnodos):
-        # Embellecemos el subnodo técnico (ej: "openfire" -> "Openfire", "batocera" -> "Batocera")
+        # Embellecemos el subnodo técnico (ej: "openfire" -> "OPENFIRE")
         nombre_limpio = subnodo.replace("_", " ").upper()
-        teclado.append([InlineKeyboardButton(f"📂 [ {nombre_limpio} ]", callback_data=f"subnodo:{subnodo}")])
+        teclado.append([InlineKeyboardButton(f"📁 [ {nombre_limpio} ]", callback_data=f"subnodo:{subnodo}")])
         
     teclado.append([InlineKeyboardButton("⬅️ VOLVER AL ÍNDICE", callback_data="menu:volver")])
     return InlineKeyboardMarkup(teclado)
@@ -60,7 +60,7 @@ async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_
         f"⚠️ **REGISTRO NO ENCONTRADO**\n"
         f"{rango}, los parámetros solicitados no constan en los índices de acceso rápido.\n\n"
         f"📋 **SISTEMA DE ASISTENCIA DIRECTA S-2**\n"
-        f"Seleccione en la interfaz la categoría de inteligencia que desea inspeccionar:"
+        f"Por favor, seleccione directamente en la interfaz el sector de inteligencia a inspeccionar:"
     )
     
     if update.message:
@@ -70,7 +70,7 @@ async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_
 async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Maneja el clic sobre una rama autorizada y despliega sus subnodos de configuración."""
     query = update.callback_query
-    await query.answer() 
+    await query.answer() # Libera el estado de carga en los servidores de Telegram inmediatamente
     
     datos = query.data
     if datos == "menu:cancelar":
@@ -85,7 +85,7 @@ async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_
         nombre_rama_limpio = MAPEO_TACTICO.get(rama_seleccionada, rama_seleccionada.replace("_", " ").upper())
         
         await query.edit_message_text(
-            text=f"📂 **DIVISIÓN ACTIVA:**\n*{nombre_rama_limpio}*\n\nSeleccione el entorno o sistema específico para desplegar el manual de contingencia:",
+            text=f"📂 **DIVISIÓN ACTIVA:**\n*{nombre_rama_limpio}*\n\nSeleccione el archivo específico para desplegar el manual táctico:",
             reply_markup=teclado,
             parse_mode="Markdown"
         )
@@ -96,7 +96,7 @@ async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_
 async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Maneja el clic sobre el subnodo final, inyecta la solución y cierra la conversación de forma segura."""
     query = update.callback_query
-    await query.answer()
+    await query.answer() # Libera el callback de inmediato para evitar el bucle "Cargando..."
     
     datos = query.data
     if datos == "menu:volver":
@@ -111,7 +111,7 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
     if datos.startswith("subnodo:"):
         subnodo_seleccionado = datos.split(":")[1]
         
-        # Fijamos de forma estricta en la sesión el subnodo elegido para saltear la búsqueda libre
+        # Fijamos de forma estricta en la sesión el subnodo elegido para saltar la búsqueda libre
         context.user_data["forzar_subnodo"] = subnodo_seleccionado
         
         await query.edit_message_text(f"⚡ *Extrayendo registros de [ {subnodo_seleccionado.upper()} ] y procesando con cascada de IA...*", parse_mode="Markdown")
@@ -123,8 +123,8 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
         if query.message:
             query.message.text = subnodo_seleccionado
             
-        # Transferimos la ejecución al hilo principal del bot para que dispare la IA en cascada
-        await main.procesar_mensaje(update, context)
+        # Ejecutamos el procesamiento sin bloquear la máquina de estados nativa de la botonera
+        asyncio.create_task(main.procesar_mensaje(update, context))
         
         return ConversationHandler.END
 
