@@ -277,8 +277,16 @@ def main():
     threading.Thread(target=run_flask, daemon=True).start()
 
     try:
-        # 3. Construimos la aplicación de Telegram de forma estándar
-        application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
+        # 3. Construimos la aplicación ampliando el pool de timeouts de red para evitar cortes
+        application = (
+            Application.builder()
+            .token(ai_cascade.TELEGRAM_TOKEN)
+            .read_timeout(30)
+            .write_timeout(30)
+            .connect_timeout(30)
+            .pool_timeout(30)
+            .build()
+        )
         
         # CONFIGURACIÓN DEL CONTROLADOR DE CONVERSACIONES NATIVO (FSM)
         manejador_encuesta = ConversationHandler(
@@ -291,15 +299,13 @@ def main():
             allow_reentry=True
         )
         
-        # Registramos el manejador maestro
+        # Registramos los manejadores maestros
         application.add_handler(manejador_encuesta)
-        
-        # Manejador de respaldo para comandos directos o eventos aislados
         application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
 
         print("🚀 Oficial S-2 modularizado y blindado en línea. ¡Escuchando transmisiones!")
         
-        # 4. run_polling se encarga de bloquear el MainThread de manera asíncrona segura sin romper el loop de eventos
+        # 4. run_polling bloquea el hilo principal y limpia las actualizaciones pendientes al iniciar
         application.run_polling(drop_pending_updates=True)
         
     except Exception as e:
