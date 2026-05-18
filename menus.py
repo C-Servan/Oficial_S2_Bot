@@ -93,14 +93,20 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
     if datos.startswith("subnodo:"):
         subnodo_seleccionado = datos.split(":")[1]
         
-        # Le pasamos el control al flujo principal simulando que el usuario escribió el nombre exacto
+        # Guardamos en sesión el subnodo elegido
         context.user_data["forzar_subnodo"] = subnodo_seleccionado
         
         await query.edit_message_text(f"⚡ *Extrayendo subnodo '{subnodo_seleccionado}' y analizando con Inteligencia Artificial...*", parse_mode="Markdown")
         
-        # Finalizamos la conversación de menús para que el procesador de mensajes normal devuelva la respuesta de la IA
-        # Para lograr esto de forma limpia, llamamos a la función encargada de ejecutar la IA en el main.py
-        # Pero primero cerramos el estado FSM para liberar el chat.
+        # EVITAMOS IMPORTACIÓN CIRCULAR: Importamos el núcleo central aquí abajo, solo cuando se ejecuta el botón
+        import main
+        
+        # Inyectamos el texto simulado en el mensaje para que el procesador lo lea limpiamente
+        query.message.text = subnodo_seleccionado
+        
+        # Transferimos el hilo de ejecución al procesador principal
+        await main.procesar_mensaje(query, context)
+        
         return ConversationHandler.END
 
     return ESTADO_SUBNODO
