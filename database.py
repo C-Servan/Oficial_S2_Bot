@@ -1,6 +1,7 @@
 # database.py
 import os
 import json
+import re
 import firebase_admin
 from firebase_admin import credentials, db
 
@@ -9,14 +10,15 @@ firebase_creds_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
 
 if firebase_creds_json:
     try:
-        creds_dict = json.loads(firebase_creds_json)
-        cred = credentials.Certificate(creds_dict)
-        
         if not firebase_admin._apps:
+            creds_dict = json.loads(firebase_creds_json)
+            cred = credentials.Certificate(creds_dict)
             firebase_admin.initialize_app(cred, {
                 'databaseURL': 'https://enciclopedia-oficial-s-2-default-rtdb.europe-west1.firebasedatabase.app/'
             })
-        print("✅ [MÓDULO BD] Conexión blindada a la Enciclopedia S-2 establecida.")
+            print("✅ [MÓDULO BD] Conexión blindada a la Enciclopedia S-2 establecida.")
+        else:
+            print("✅ [MÓDULO BD] Conexión Firebase ya activa en subproceso.")
     except Exception as e:
         print(f"❌ [MÓDULO BD] Error crítico al inicializar Firebase: {e}")
 else:
@@ -58,12 +60,13 @@ def buscar_coincidencia_exacta(mensaje_usuario: str) -> tuple:
     """
     try:
         mapa = obtener_mapa_superficial()
-        mensaje_min = mensaje_usuario.strip().lower()
+        # Normalización total: quitamos espacios, guiones y pasamos a minúsculas
+        mensaje_limpio = re.sub(r'[\s_\-]', '', mensaje_usuario.strip().lower())
         
         for rama, subnodos in mapa.items():
             for subnodo in subnodos:
-                # Comprobación estricta y limpia sin espacios ni guiones
-                if subnodo.lower() == mensaje_min or subnodo.lower().replace("_", "") == mensaje_min.replace(" ", ""):
+                subnodo_limpio = re.sub(r'[\s_\-]', '', subnodo.lower())
+                if subnodo_limpio == mensaje_limpio:
                     ref_especifica = db.reference(f'Enciclopedia_S2/{rama}/{subnodo}')
                     datos = ref_especifica.get()
                     return datos, rama, subnodo
