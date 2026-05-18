@@ -123,7 +123,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         indice_raw, canal_indexador = ai_cascade.ejecutar_ia_con_cascada(prompt_indexador, contenido_web)
         indice_raw = re.sub(r'[`\s\n]', '', indice_raw)
         categorias = [cat.strip() for cat in indice_raw.split(",") if cat.strip()]
-        if not categorias:
+        if not categories:
             categorias = ["Manual_Instalacion", "Calibracion_Hardware", "FAQ", "Resolucion_Problemas"]
     except Exception as err_idx:
         print(f"Fallo en indexador dinámico, aplicando categorías base: {err_idx}")
@@ -260,38 +260,41 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- 4. LANZAMIENTO Y CONFIGURACIÓN DEL BOT ---
 def main():
     if not ai_cascade.TELEGRAM_TOKEN:
-        print("Falta TELEGRAM_TOKEN. Abortando misión.")
+        print("❌ [CRÍTICO] Falta TELEGRAM_TOKEN. Abortando misión.")
         return
 
-    # Hilo para el servidor web de Render/Railway
+    # Lanzamos el servidor web Flask en su propio hilo secundario para Render
+    print("📡 Iniciando servidor web de telemetría...")
     threading.Thread(target=run_flask, daemon=True).start()
 
-    while True:
-        try:
-            application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
-            
-            # CONFIGURACIÓN DEL CONTROLADOR DE CONVERSACIONES NATIVO (FSM)
-            manejador_encuesta = ConversationHandler(
-                entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje)],
-                states={
-                    menus.ESTADO_RAMA: [CallbackQueryHandler(menus.procesar_seleccion_rama)],
-                    menus.ESTADO_SUBNODO: [CallbackQueryHandler(menus.procesar_seleccion_subnodo)]
-                },
-                fallbacks=[CommandHandler('cancelar', menus.cancelar_navegacion)],
-                allow_reentry=True
-            )
-            
-            # Registramos el manejador maestro
-            application.add_handler(manejador_encuesta)
-            
-            # Manejador de respaldo para comandos directos o eventos aislados
-            application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
+    try:
+        # Construimos la aplicación de Telegram de forma estándar
+        application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
+        
+        # CONFIGURACIÓN DEL CONTROLADOR DE CONVERSACIONES NATIVO (FSM)
+        manejador_encuesta = ConversationHandler(
+            entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_mensaje)],
+            states={
+                menus.ESTADO_RAMA: [CallbackQueryHandler(menus.procesar_seleccion_rama)],
+                menus.ESTADO_SUBNODO: [CallbackQueryHandler(menus.procesar_seleccion_subnodo)]
+            },
+            fallbacks=[CommandHandler('cancelar', menus.cancelar_navegacion)],
+            allow_reentry=True
+        )
+        
+        # Registramos el manejador maestro
+        application.add_handler(manejador_encuesta)
+        
+        # Manejador de respaldo para comandos directos o eventos aislados
+        application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
 
-            print("🚀 Oficial S-2 modularizado y blindado en línea. ¡RELOAD!")
-            application.run_polling(drop_pending_updates=True)
-        except Exception as e:
-            print(f"Error en polling de Telegram: {e}")
-            time.sleep(5)
+        print("🚀 Oficial S-2 modularizado y blindado en línea. ¡Escuchando transmisiones!")
+        
+        # run_polling bloquea el hilo principal de forma asíncrona correcta sin romper el loop de eventos
+        application.run_polling(drop_pending_updates=True)
+        
+    except Exception as e:
+        print(f"❌ Error crítico durante la ejecución del Bot: {e}")
 
 if __name__ == "__main__":
     main()
