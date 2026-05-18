@@ -115,12 +115,8 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
 
     prompt_indexador = (
         "Actúas como el Ingeniero de Reconocimiento del Oficial S-2. Tu único objetivo es analizar la información textual extraída de una web "
-        "y estructurar un ÍNDICE DINÁMICO de categorías estandarizadas basadas estrictamente en la materia tratada en el documento.\n\n"
-        "REGLAS OBLIGATORIAS:\n"
-        "1. Identifica entre 3 y 7 categorías lógicas.\n"
-        "2. Formatea las categorías usando CamelCase o guiones bajos sin espacios.\n"
-        "3. Responde ÚNICAMENTE con la lista de categorías separadas por comas.\n\n"
-        "Ejemplo de respuesta:\nManual_Instalacion, Calibracion_Hardware, FAQ"
+        "y estructurar un ÍNDICE DINÁMICO de categorías estandarizadas.\n\n"
+        "Responde ÚNICAMENTE con la lista de categorías separadas por comas."
     )
 
     try:
@@ -151,7 +147,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         prompt_oleada = (
             f"Actúas como el Especialista de Ingesta Táctica S-2 para la sección '{category}'. Tu misión es extraer de manera quirúrgica "
             f"toda la información de la nueva web que corresponda EXCLUSIVAMENTE a la temática de la categoría '{category}' y fusionarla con el histórico.\n\n"
-            f"Responde ÚNICAMENTE con el desarrollo de texto de la sección unificada, sin etiquetas del formato anterior, sin bloques de código, ni comentarios externos."
+            f"Responde ÚNICAMENTE con el desarrollo de texto de la sección unificada."
         )
 
         try:
@@ -185,29 +181,37 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         return (
             f"[{canales_str}]\n\n"
             f"¡Fase 2 Completada con éxito, {prefijo_rango}! El sistema ha mapeado dinámicamente un índice de {len(categorias)} categorías. "
-            f"La información ha sido procesada por oleadas y fusionada de manera incremental en "
-            f"'{rama_detectada}/{subnodo_detectado}' sin pérdidas sintácticas ni saturación."
+            f"La información ha sido procesada por oleadas y fusionada de manera incremental."
         )
     except Exception as err:
         return f"Error crítico al inyectar el payload consolidado en Firebase: {str(err)}."
 
 # --- 3. PROCESADOR PRINCIPAL DE MENSAJES E INTEGRACIÓN DE IA ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
+    # Soporte polimórfico: Maneja tanto mensajes directos como redirecciones de CallbackQueries de botones
+    is_callback = update.callback_query is not None
+    
+    if is_callback:
+        user = update.callback_query.from_user
+        msg_obj = update.callback_query.message
+        mensaje_usuario = msg_obj.text.strip() if msg_obj.text else ""
+    else:
+        if not update.message or not update.message.text:
+            return
+        user = update.message.from_user
+        msg_obj = update.message
+        mensaje_usuario = msg_obj.text.strip()
 
-    user = update.message.from_user
     username = f"@{user.username}" if user.username else user.first_name
-    mensaje_usuario = update.message.text.strip()
 
-    # INTERCEPTOR DE COMANDO /GUARDAR
-    if mensaje_usuario.startswith("/guardar"):
+    # INTERCEPTOR DE COMANDO /GUARDAR (Exclusivo para mensajes directos de texto)
+    if not is_callback and mensaje_usuario.startswith("/guardar"):
         resultado_guardado = ejecutar_ingesta_base_datos(username, mensaje_usuario)
-        await update.message.reply_text(f"{resultado_guardado}\n\nCambio y corto. ¡RELOAD!")
+        await msg_obj.reply_text(f"{resultado_guardado}\n\nCambio y corto. ¡RELOAD!")
         return
 
     # COMANDO O PREGUNTA DE ESTADO SISTEMA
-    if mensaje_usuario.lower() in ["/estado", "estado", "¿con qué ia estás trabajando?", "con que ia estas trabajando"]:
+    if not is_callback and mensaje_usuario.lower() in ["/estado", "estado", "¿con qué ia estás trabajando?", "con que ia estas trabajando"]:
         reporte_estado = (
             "📊 **INFORME DE ESTADO OPERATIVO - OFICIAL S-2**\n"
             f"• Canal Alpha (Groq - {ai_cascade.MODELO_GROQ}): {'🟢 ONLINE' if ai_cascade.GROQ_API_KEY else '🔴 OFFLINE'}\n"
@@ -216,11 +220,10 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "**Prioridad de Enrutamiento:** Cascada Táctica (Alpha ➡️ Bravo ➡️ Charlie).\n"
             "El sistema responderá utilizando el canal prioritario disponible."
         )
-        await update.message.reply_text(reporte_estado, parse_mode="Markdown")
+        await msg_obj.reply_text(reporte_estado, parse_mode="Markdown")
         return
 
     # ANALIZADOR DE CONTEXTO REAL EN FIREBASE
-    # Si venimos del desvío de los botones, forzamos el subnodo elegido
     if "forzar_subnodo" in context.user_data:
         subnodo_elegido = context.user_data.pop("forzar_subnodo")
         from firebase_admin import db
@@ -241,19 +244,18 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             contexto_real, coincidencia = "", False
 
-    # SI NO HAY COINCIDENCIA (Ej: "Dame información sobre Openfire"), DISPARAMOS LA ENCUESTA INTERACTIVA
+    # SI NO HAY COINCIDENCIA, SE DISPARA LA INTERFAZ INTERACTIVA
     if not coincidencia or mensaje_usuario.lower() in ["ayuda", "/ayuda", "menu", "menú"]:
-        # Iniciamos el ConversationHandler enviándole el control a menus.py
         await menus.activar_encuesta_indice(update, context, mensaje_usuario)
-        return ConversationHandler.END
+        return
 
     # FLUJO SEGURO DE IA EN CASCADA
     try:
         respuesta, canal = ai_cascade.procesar_consulta_directa(mensaje_usuario, contexto_real, username)
-        await update.message.reply_text(f"[{canal}]\n\n{respuesta}")
+        await msg_obj.reply_text(f"[{canal}]\n\n{respuesta}")
     except Exception as e:
         print(f"❌ Error crítico en cascada de IA: {e}")
-        await update.message.reply_text("❌ INTERFERENCIA: Todos los canales de inteligencia están caídos debido a desbordamiento.")
+        await msg_obj.reply_text("❌ INTERFERENCIA: Todos los canales de inteligencia están caídos debido a desbordamiento.")
 
 # --- 4. LANZAMIENTO Y CONFIGURACIÓN DEL BOT ---
 def main():
@@ -282,7 +284,7 @@ def main():
             # Registramos el manejador maestro
             application.add_handler(manejador_encuesta)
             
-            # Manejador de respaldo para comandos directos
+            # Manejador de respaldo para comandos directos o eventos aislados
             application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
 
             print("🚀 Oficial S-2 modularizado y blindado en línea. ¡RELOAD!")
