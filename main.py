@@ -172,7 +172,7 @@ def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str):
     raise Exception("Todos los canales de procesamiento de IA se encuentran fuera de servicio debido a saturación de tokens.")
 
 def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
-    """Descarga la información existente, la fusiona inteligentemente con la nueva entrada y la actualiza."""
+    """Descarga la información existente, genera un índice dinámico y procesa la web por secciones secuenciales."""
     autorizados = ["@carlosfservan", "@gargarensis76", "@gwyllion16"]
     if username.lower() not in autorizados:
         return f"Recluta, transmision denegada. No posees autorización de escritura en los Archivos de Inteligencia S-2."
@@ -197,98 +197,104 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         print(f"Aviso: No se pudo leer el histórico (procesando como nodo nuevo): {e}")
 
     contenido_web = extraer_contenido_url(comando_texto)
-    
-    datos_completos_para_ia = (
-        f"--- CONOCIMIENTO HISTÓRICO ALMACENADO EN FIREBASE ---\n{json.dumps(datos_existentes, ensure_ascii=False)}\n\n"
-        f"--- NUEVA INFORMACIÓN ENTRANTE ENVIADA POR OPERADOR ---\n{comando_texto}\n{contenido_web}"
-    )
+    if not contenido_web or "[ERROR TÉCNICO" in contenido_web:
+        return f"Error en la extracción de la URL. Abortando misión: {contenido_web}"
 
-    prompt_parseo = (
-        "Actúa como el Editor Jefe y Analista de Datos de la Enciclopedia S-2. Tu único objetivo es procesar la nueva información técnica "
-        "y los arrays multimedia provistos, y fusionarlos de manera incremental con el conocimiento histórico ya existente sin destruir nada.\n\n"
-        "REGLAS ESTRATÉGICAS DE FUSIÓN (MERGE):\n"
-        "1. Mantén la 'rama' y el 'subnodo' consistentes con el destino indicado.\n"
-        "2. Organiza la información utilizando de manera fija estas cinco secciones estructurales:\n"
-        "   - 'Descripcion': Explicación completa e introductoria del sistema o emulador.\n"
-        "   - 'Calibracion_Hardware': Protocolos de botones, alineación IR, pasos específicos por modelo de Lightgun.\n"
-        "   - 'Emuladores_Soportados': Cores, configuraciones, emuladores compatibles y archivos del sistema.\n"
-        "   - 'FAQ': Banco de preguntas y respuestas recopiladas.\n"
-        "   - 'Resolucion_Problemas': Fallos en pantalla, pérdida de tracking, bugs conocidos y parches técnicos.\n"
-        "3. LÓGICA EVOLUTIVA: No borres datos antiguos. Si una sección ya tiene texto e ingresa información Tracking, haz un 'merge': combina "
-        "ambos bloques redactando un manual unificado más extenso, detallado y jerarquizado. Si la información entrante es idéntica o desactualizada, "
-        "prioriza los datos más recientes y precisos.\n"
-        "4. MULTIMEDIA BLINDADA: Combina las listas de imágenes y vídeos preexistentes con las nuevas detectadas. Elimina duplicados exactos.\n\n"
-        "REGLA DE FORMATO INQUEBRANTABLE: NO RESPONDAS EN JSON. Genera texto plano utilizando EXCLUSIVAMENTE los siguientes delimitadores taxonómicos para separar los campos. No agregues ninguna comilla de escape externa ni bloques de código markdown:\n\n"
-        "===RAMA===\n"
-        "Coloca aquí el nombre de la rama\n"
-        "===SUBNODO===\n"
-        "Coloca aquí el nombre del subnodo\n"
-        "===DESCRIPCION===\n"
-        "Coloca aquí el texto unificado de la sección\n"
-        "===CALIBRACION_HARDWARE===\n"
-        "Coloca aquí el texto unificado de la sección\n"
-        "===EMULADORES_SOPORTADOS===\n"
-        "Coloca aquí el texto unificado de la sección\n"
-        "===FAQ===\n"
-        "Coloca aquí el texto unificado de la sección\n"
-        "===RESOLUCION_PROBLEMAS===\n"
-        "Coloca aquí el texto unificado de la sección\n"
-        "===IMAGENES_ESQUEMA===\n"
-        "Coloca aquí una URL por línea\n"
-        "===VIDEOS_TUTORIAL===\n"
-        "Coloca aquí una URL por línea\n"
-        "===FIN==="
+    # ==========================================
+    # PASO 1: PASADA DE RECONOCIMIENTO (MAPEO DEL ÍNDICE)
+    # ==========================================
+    prompt_indexador = (
+        "Actúas como el Ingeniero de Reconocimiento del Oficial S-2. Tu único objetivo es analizar la información textual extraída de una web "
+        "y estructurar un ÍNDICE DINÁMICO de categorías estandarizadas basadas estrictamente en la materia tratada en el documento.\n\n"
+        "REGLAS OBLIGATORIAS:\n"
+        "1. Identifica entre 3 y 7 categorías lógicas que agrupen perfectamente todo el contenido expuesto en la web (ejemplos válidos: Manual_Instalacion, Calibracion_Hardware, FAQ, Resolucion_Problemas, Requisitos_Sistema, Comandos_Consola, etc).\n"
+        "2. Formatea las categorías usando CamelCase o guiones bajos sin espacios.\n"
+        "3. Responde ÚNICAMENTE con la lista de categorías separadas por comas, sin introducciones, saludos, ni bloques de código Markdown.\n\n"
+        "Ejemplo de respuesta esperada:\n"
+        "Manual_Instalacion, Calibracion_Hardware, FAQ, Resolucion_Problemas"
     )
 
     try:
-        resultado_raw, canal_usado = ejecutar_ia_con_cascada(prompt_parseo, datos_completos_para_ia)
-        
-        # PARSER NATIVO MEDIANTE EXPRESIONES REGULARES (INMUNE A COMPORTAMIENTOS JSON ERÁTICOS)
-        def extraer_seccion(tag, texto_fuente, por_lineas=False):
-            patron = rf"==={tag}===\n(.*?)(?=\n===|$)"
-            match = re.search(patron, texto_fuente, re.DOTALL)
-            if match:
-                contenido = match.group(1).strip()
-                if por_lineas:
-                    return [linea.strip() for linea in contenido.split("\n") if linea.strip() and linea.strip().startswith("http")]
-                return contenido
-            return [] if por_lineas else ""
+        indice_raw, canal_indexador = ejecutar_ia_con_cascada(prompt_indexador, contenido_web)
+        # Limpieza de cualquier residuo sintáctico de la IA
+        indice_raw = re.sub(r'[`\s\n]', '', indice_raw)
+        categorias = [cat.strip() for cat in indice_raw.split(",") if cat.strip()]
+        if not categorias:
+            categorias = ["Manual_Instalacion", "Calibracion_Hardware", "FAQ", "Resolucion_Problemas"]
+    except Exception as err_idx:
+        print(f"Fallo en indexador dinámico, aplicando categorías base: {err_idx}")
+        categorias = ["Manual_Instalacion", "Calibracion_Hardware", "FAQ", "Resolucion_Problemas"]
 
-        rama = extraer_seccion("RAMA", resultado_raw) or rama_detectada
-        subnodo = extraer_seccion("SUBNODO", resultado_raw) or subnodo_detectado
-        
-        # Combinación inteligente y limpia de listas multimedia nativas
-        nuevas_img = extraer_seccion("IMAGENES_ESQUEMA", resultado_raw, por_lineas=True)
-        nuevos_vid = extraer_seccion("VIDEOS_TUTORIAL", resultado_raw, por_lineas=True)
-        
-        img_historicas = datos_existentes.get("imagenes_esquema", [])
-        vid_historicos = datos_existentes.get("videos_tutorial", [])
-        
-        # Merge de arrays eliminando duplicados preservando el orden histórico
-        img_finales = list(dict.fromkeys(img_historicas + nuevas_img))
-        vid_finales = list(dict.fromkeys(vid_historicos + nuevos_vid))
+    # ==========================================
+    # PASO 2: FUSIÓN Y ASIMILACIÓN POR OLEADAS SECUENCIALES
+    # ==========================================
+    payload_acumulado = {}
+    canales_utilizados = []
+    
+    # Extraer arrays multimedia nativos del reporte web
+    urls_en_texto = re.findall(r'\"(https?://[^\s"]+)\"', contenido_web)
+    nuevas_img = [u for u in urls_en_texto if any(ext in u.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])]
+    nuevos_vid = [u for u in urls_en_texto if 'youtube.com' in u.lower() or 'youtu.be' in u.lower()]
 
-        payload = {
-            "Descripcion": extraer_seccion("DESCRIPCION", resultado_raw),
-            "Calibracion_Hardware": extraer_seccion("CALIBRACION_HARDWARE", resultado_raw),
-            "Emuladores_Soportados": extraer_seccion("EMULADORES_SOPORTADOS", resultado_raw),
-            "FAQ": extraer_seccion("FAQ", resultado_raw),
-            "Resolucion_Problemas": extraer_seccion("RESOLUCION_PROBLEMAS", resultado_raw),
-            "imagenes_esquema": img_finales,
-            "videos_tutorial": vid_finales,
-            "ultima_modificacion": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "modificado_por": username
-        }
+    for categoria in categorias:
+        texto_historico_categoria = datos_existentes.get(categoria, "No hay registros preexistentes de esta categoría.")
+        
+        datos_oleada_ia = (
+            f"=== CATEGORÍA A PROCESAR EN ESTA OLEADA ===\n{categoria}\n\n"
+            f"=== HISTÓRICO ALMACENADO EN FIREBASE PARA ESTA CATEGORÍA ===\n{texto_historico_categoria}\n\n"
+            f"=== CONTENIDO COMPLETO DE LA NUEVA WEB ===\n{contenido_web}"
+        )
 
-        # Inyección dinámica blindada en la base de datos distribuida de Firebase
-        ref = db.reference(f'Enciclopedia_S2/{rama}/{subnodo}')
-        ref.update(payload)
+        prompt_oleada = (
+            f"Actúas como el Especialista de Ingesta Táctica S-2 para la sección '{categoria}'. Tu misión es extraer de manera quirúrgica "
+            f"toda la información de la nueva web que corresponda EXCLUSIVAMENTE a la temática de la categoría '{categoria}' y fusionarla con el histórico.\n\n"
+            f"INSTRUCCIONES DE ACCIÓN:\n"
+            f"1. Haz un 'merge' inteligente: Redacta un manual unificado, extenso, técnico, jerarquizado y más detallado combinando el conocimiento histórico con los nuevos datos entrantes.\n"
+            f"2. Si la web entrante no aporta nada nuevo o útil para la sección '{categoria}', mantén íntegro e intacto el texto histórico que se te ha provisto.\n"
+            f"3. No inventes configuraciones, mantén la precisión analítica absoluta.\n"
+            f"4. Responde ÚNICAMENTE con el desarrollo de texto de la sección unificada, sin etiquetas del formato anterior, sin bloques de código ```json o ```markdown, y sin comentarios editoriales externos."
+        )
+
+        try:
+            texto_fusionado, canal_oleada = ejecutar_ia_con_cascada(prompt_oleada, datos_oleada_ia)
+            payload_acumulado[categoria] = texto_fusionado.strip()
+            if canal_oleada not in canales_utilizados:
+                canales_utilizados.append(canal_oleada)
+            # Retraso táctico anti-saturación de Rate Limits (RPM) en la API
+            time.sleep(0.5)
+        except Exception as err_oleada:
+            print(f"Error procesando la oleada {categoria}: {err_oleada}")
+            payload_acumulado[categoria] = texto_historico_categoria
+
+    # Combinación y limpieza estricta de metadatos multimedia
+    img_historicas = datos_existentes.get("imagenes_esquema", [])
+    vid_historicos = datos_existentes.get("videos_tutorial", [])
+    img_finales = list(dict.fromkeys(img_historicas + nuevas_img))
+    vid_finales = list(dict.fromkeys(vid_historicos + nuevos_vid))
+
+    # Construcción final del payload simétrico asimilado
+    payload_final = {**payload_acumulado}
+    payload_final["imagenes_esquema"] = img_finales
+    payload_final["videos_tutorial"] = vid_finales
+    payload_final["ultima_modificacion"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    payload_final["modificado_por"] = username
+
+    try:
+        # Inyección atómica directa en Firebase Realtime Database
+        ref = db.reference(f'Enciclopedia_S2/{rama_detectada}/{subnodo_detectado}')
+        ref.update(payload_final)
         
         prefijo_rango = "Comandante" if username.lower() == "@carlosfservan" else "Sargento"
-        return f"[{canal_usado}]\n\n{prefijo_rango}, la base de datos ha asimilado la información de forma incremental. El manual de '{rama}/{subnodo}' ha sido fusionado y expandido mediante el analizador nativo sin pérdidas sintácticas."
+        canales_str = ", ".join(canales_utilizados)
+        return (
+            f"[{canales_str}]\n\n"
+            f"¡Fase 2 Completada con éxito, {prefijo_rango}! El sistema ha mapeado dinámicamente un índice de {len(categorias)} categorías "
+            f"({', '.join(categorias)}). La información ha sido procesada por oleadas y fusionada de manera incremental en "
+            f"'{rama_detectada}/{subnodo_detectado}' sin pérdidas sintácticas ni saturación de memoria."
+        )
         
     except Exception as err:
-        return f"Error en el sistema de ingesta táctica en cascada: {str(err)}. Transmisión abortada."
+        return f"Error crítico al inyectar el payload consolidado en Firebase: {str(err)}. Transmisión abortada."
 
 # --- 5. LÓGICA DE RESPUESTA EN CASCADA CON CONTEXTO REAL ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
