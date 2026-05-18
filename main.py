@@ -123,7 +123,7 @@ def ejecutar_ingesta_base_datos(username: str, comando_texto: str) -> str:
         indice_raw, canal_indexador = ai_cascade.ejecutar_ia_con_cascada(prompt_indexador, contenido_web)
         indice_raw = re.sub(r'[`\s\n]', '', indice_raw)
         categorias = [cat.strip() for cat in indice_raw.split(",") if cat.strip()]
-        if not categories:
+        if not categorias:
             categorias = ["Manual_Instalacion", "Calibracion_Hardware", "FAQ", "Resolucion_Problemas"]
     except Exception as err_idx:
         print(f"Fallo en indexador dinámico, aplicando categorías base: {err_idx}")
@@ -259,16 +259,25 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- 4. LANZAMIENTO Y CONFIGURACIÓN DEL BOT ---
 def main():
+    import asyncio
+    
     if not ai_cascade.TELEGRAM_TOKEN:
         print("❌ [CRÍTICO] Falta TELEGRAM_TOKEN. Abortando misión.")
         return
 
-    # Lanzamos el servidor web Flask en su propio hilo secundario para Render
+    # 1. Forzar e inicializar un loop de eventos asíncronos limpio en el hilo principal
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # 2. Lanzamos el servidor web Flask en su propio hilo secundario para Render
     print("📡 Iniciando servidor web de telemetría...")
     threading.Thread(target=run_flask, daemon=True).start()
 
     try:
-        # Construimos la aplicación de Telegram de forma estándar
+        # 3. Construimos la aplicación de Telegram de forma estándar
         application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
         
         # CONFIGURACIÓN DEL CONTROLADOR DE CONVERSACIONES NATIVO (FSM)
@@ -290,7 +299,7 @@ def main():
 
         print("🚀 Oficial S-2 modularizado y blindado en línea. ¡Escuchando transmisiones!")
         
-        # run_polling bloquea el hilo principal de forma asíncrona correcta sin romper el loop de eventos
+        # 4. run_polling se encarga de bloquear el MainThread de manera asíncrona segura sin romper el loop de eventos
         application.run_polling(drop_pending_updates=True)
         
     except Exception as e:
