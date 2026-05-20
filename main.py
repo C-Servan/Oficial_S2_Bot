@@ -7,6 +7,7 @@ from telegram import Update
 from telegram.ext import (
     Application, 
     MessageHandler, 
+    CommandHandler, 
     CallbackQueryHandler, 
     filters, 
     ContextTypes
@@ -15,6 +16,7 @@ from telegram.ext import (
 # Inyección de módulos tácticos
 import database
 import ai_cascade
+import menus  # Importamos el módulo de menús para activar la encuesta
 
 # --- 1. CONFIGURACIÓN DEL SERVIDOR WEB (RENDER) ---
 app = Flask(__name__)
@@ -42,7 +44,6 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = update.message.text.strip()
 
     # A. COMANDO DE INGESTA TÁCTICA (/guardar)
-    # Prioridad absoluta: captura todo el texto y corta el flujo si es el comando
     if not is_callback and data.startswith("/guardar"):
         partes = data.replace("/guardar", "").split("|")
         if len(partes) == 5:
@@ -78,14 +79,21 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # C. CONSULTA ABIERTA (IA DE RESPALDO)
     if not is_callback:
-        await msg_obj.reply_text("📡 Transmisión recibida. Procesando consulta...")
-        # Lógica de IA existente aquí...
+        # Aquí la IA procesa la duda y sugiere los botones mediante activar_encuesta_indice
+        respuesta_ia, canal = ai_cascade.procesar_consulta_directa(
+            data, 
+            str(database.obtener_datos_nodo("GLOBAL")), 
+            update.message.from_user.username
+        )
+        await msg_obj.reply_text(f"📡 {respuesta_ia}\n\n*Nota del sistema: Si no encuentra su solución, utilice /ayuda para navegar por los menús.*", parse_mode="Markdown")
+        await menus.activar_encuesta_indice(update, context, "Sugerencia de navegación")
 
 # --- 3. LANZAMIENTO Y CONFIGURACIÓN ASÍNCRONA ---
 async def start_bot():
     application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
     
-    # Handlers unificados para evitar conflictos de prioridad
+    # Handlers
+    application.add_handler(CommandHandler("ayuda", menus.activar_encuesta_indice))
     application.add_handler(CallbackQueryHandler(procesar_mensaje, pattern="^nav:"))
     application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
 
@@ -108,7 +116,6 @@ def main():
     print("📡 Iniciando servidor web de telemetría...")
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # Ejecución asíncrona controlada
     asyncio.run(start_bot())
 
 if __name__ == "__main__":
