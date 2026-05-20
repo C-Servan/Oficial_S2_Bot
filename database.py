@@ -13,7 +13,8 @@ if firebase_creds_json:
 def guardar_manual_estructurado(ruta, titulo, texto, imgs, vids):
     """Escribe el manual directamente en Firebase en la ruta especificada."""
     try:
-        ref = db.reference(f'Enciclopedia_S2/{ruta}')
+        # CORRECCIÓN TÁCTICA: Apuntamos directo a la ruta (raíz)
+        ref = db.reference(ruta)
         payload = {
             "titulo": titulo,
             "texto_manual": texto,
@@ -29,7 +30,8 @@ def guardar_manual_estructurado(ruta, titulo, texto, imgs, vids):
 def obtener_datos_nodo(ruta):
     """Lee el manual de forma directa desde la ruta especificada."""
     try:
-        ref = db.reference(f'Enciclopedia_S2/{ruta}')
+        # CORRECCIÓN TÁCTICA: Apuntamos directo a la ruta (raíz)
+        ref = db.reference(ruta)
         return ref.get()
     except Exception as e:
         print(f"❌ Error en lectura: {e}")
@@ -37,11 +39,12 @@ def obtener_datos_nodo(ruta):
 
 def obtener_mapa_superficial():
     """
-    Explora la raíz 'Enciclopedia_S2' en Firebase para construir dinámicamente
+    Explora la raíz real en Firebase para construir dinámicamente
     el mapa de ramas y subnodos necesarios para el menú interactivo.
     """
     try:
-        ref = db.reference('Enciclopedia_S2')
+        # CORRECCIÓN TÁCTICA: Leemos la raíz pura '/' en lugar de 'Enciclopedia_S2'
+        ref = db.reference('/')
         datos_raiz = ref.get()
         
         if not datos_raiz:
@@ -50,6 +53,10 @@ def obtener_mapa_superficial():
         mapa = {}
         # Iteramos sobre las ramas principales (ej: 1_light_guns, 2_sistemas)
         for rama, contenido in datos_raiz.items():
+            # Filtro de seguridad: ignoramos el nodo residual viejo si existiera
+            if rama == "Enciclopedia_S2":
+                continue
+                
             if isinstance(contenido, dict):
                 # Extraemos los nombres de los subnodos que cuelgan de cada rama
                 mapa[rama] = list(contenido.keys())
