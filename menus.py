@@ -37,13 +37,18 @@ def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(teclado)
 
 async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Activa el menú principal."""
+    """Activa el menú interactivo principal desde comandos o callbacks de reseteo."""
     teclado = generar_menu_ramas()
     
     user = update.message.from_user if update.message else update.callback_query.from_user
     username = f"@{user.username}" if user.username else user.first_name
     
-    rango = "Comandante" if username.lower() == "@carlosfservan" else ("Sargento" if username.lower() in ["@gargarensis76", "@gwyllion16"] else "Recluta")
+    if username.lower() == "@carlosfservan":
+        rango = "Comandante"
+    elif username.lower() in ["@gargarensis76", "@gwyllion16"]:
+        rango = "Sargento"
+    else:
+        rango = "Recluta"
 
     mensaje = (
         f"📋 **SISTEMA DE ASISTENCIA DIRECTA S-2**\n"
@@ -101,8 +106,7 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
         
         await query.edit_message_text(f"⚡ *Extrayendo registros de [ {ruta_completa.upper()} ]...*", parse_mode="Markdown")
         
-        # En lugar de importar main aquí, delegamos el proceso final al bot
-        # Simulamos un callback para disparar la lógica de navegación de main
+        # Redirección interna sin colisión de dependencias circulares
         query.data = f"nav:{ruta_completa}"
         import main
         await main.procesar_mensaje(update, context)
