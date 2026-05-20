@@ -37,24 +37,13 @@ def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(teclado)
 
 async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Activa el menú interactivo principal. Ajustado para ser llamado sin argumentos extra."""
+    """Activa el menú principal."""
     teclado = generar_menu_ramas()
     
-    # Determinamos el usuario correctamente
-    user = None
-    if update.message:
-        user = update.message.from_user
-    elif update.callback_query:
-        user = update.callback_query.from_user
-        
+    user = update.message.from_user if update.message else update.callback_query.from_user
     username = f"@{user.username}" if user.username else user.first_name
     
-    if username.lower() == "@carlosfservan":
-        rango = "Comandante"
-    elif username.lower() in ["@gargarensis76", "@gwyllion16"]:
-        rango = "Sargento"
-    else:
-        rango = "Recluta"
+    rango = "Comandante" if username.lower() == "@carlosfservan" else ("Sargento" if username.lower() in ["@gargarensis76", "@gwyllion16"] else "Recluta")
 
     mensaje = (
         f"📋 **SISTEMA DE ASISTENCIA DIRECTA S-2**\n"
@@ -112,15 +101,11 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
         
         await query.edit_message_text(f"⚡ *Extrayendo registros de [ {ruta_completa.upper()} ]...*", parse_mode="Markdown")
         
+        # En lugar de importar main aquí, delegamos el proceso final al bot
+        # Simulamos un callback para disparar la lógica de navegación de main
+        query.data = f"nav:{ruta_completa}"
         import main
-        if query.message:
-            query.message.text = f"nav:{ruta_completa}"
-            
-        asyncio.create_task(main.procesar_mensaje(update, context))
+        await main.procesar_mensaje(update, context)
         return ConversationHandler.END
 
     return ESTADO_SUBNODO
-
-async def cancelar_navegacion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("📡 Operación abortada.")
-    return ConversationHandler.END
