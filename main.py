@@ -7,7 +7,6 @@ from telegram import Update
 from telegram.ext import (
     Application, 
     MessageHandler, 
-    CommandHandler, 
     CallbackQueryHandler, 
     filters, 
     ContextTypes
@@ -43,6 +42,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = update.message.text.strip()
 
     # A. COMANDO DE INGESTA TÁCTICA (/guardar)
+    # Prioridad absoluta: captura todo el texto y corta el flujo si es el comando
     if not is_callback and data.startswith("/guardar"):
         partes = data.replace("/guardar", "").split("|")
         if len(partes) == 5:
@@ -60,7 +60,6 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         datos = database.obtener_datos_nodo(ruta)
         
         if datos:
-            # Si el "vídeo" es en realidad un enlace a PDF de Google Drive, lo enviamos como documento
             vids = datos.get('videos', [])
             is_pdf = vids and "drive.google.com" in vids[0]
             
@@ -86,10 +85,9 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_bot():
     application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
     
-    # Handlers
+    # Handlers unificados para evitar conflictos de prioridad
     application.add_handler(CallbackQueryHandler(procesar_mensaje, pattern="^nav:"))
-    application.add_handler(CommandHandler("guardar", procesar_mensaje))
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), procesar_mensaje))
+    application.add_handler(MessageHandler(filters.TEXT, procesar_mensaje))
 
     print("🚀 Oficial S-2 en línea. Arquitectura Estática Activa.")
     await application.initialize()
