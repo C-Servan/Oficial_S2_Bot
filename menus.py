@@ -2,14 +2,15 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 import database
 import asyncio
+import traceback
 
 # Definición estricta de los estados de la conversación
 ESTADO_RAMA, ESTADO_SUBNODO = range(2)
 
-# DICCIONARIO TÁCTICO
+# DICCIONARIO TÁCTICO ACTUALIZADO (Alineado con Firebase)
 MAPEO_TACTICO = {
-    "1_Manuales_tecnicos": "⚙️ CONFIG. SISTEMAS / LIGHT GUNS",
-    "2_Ecosistema_software": "🎮 EMULADORES Y SOFTWARE",
+    "1_light_guns": "🔫 LIGHT GUNS / HARDWARE",
+    "2_sistemas": "🎮 SISTEMAS Y EMULADORES",
 }
 
 def generar_menu_ramas() -> InlineKeyboardMarkup:
@@ -38,27 +39,37 @@ def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
 
 async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Activa el menú interactivo principal desde comandos o callbacks de reseteo."""
-    teclado = generar_menu_ramas()
-    
-    user = update.message.from_user if update.message else update.callback_query.from_user
-    username = f"@{user.username}" if user.username else user.first_name
-    
-    if username.lower() == "@carlosfservan":
-        rango = "Comandante"
-    elif username.lower() in ["@gargarensis76", "@gwyllion16"]:
-        rango = "Sargento"
-    else:
-        rango = "Recluta"
+    try:
+        teclado = generar_menu_ramas()
+        
+        user = update.message.from_user if update.message else update.callback_query.from_user
+        username = f"@{user.username}" if user.username else user.first_name
+        
+        if username.lower() == "@carlosfservan":
+            rango = "Comandante"
+        elif username.lower() in ["@gargarensis76", "@gwyllion16"]:
+            rango = "Sargento"
+        else:
+            rango = "Recluta"
 
-    mensaje = (
-        f"📋 **SISTEMA DE ASISTENCIA DIRECTA S-2**\n"
-        f"{rango}, seleccione el sector de inteligencia a inspeccionar:"
-    )
-    
-    if update.message:
-        await update.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
-    elif update.callback_query:
-        await update.callback_query.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
+        # CORRECCIÓN MARKDOWN: Usamos un solo * para negritas
+        mensaje = (
+            f"📋 *SISTEMA DE ASISTENCIA DIRECTA S-2*\n"
+            f"{rango}, seleccione el sector de inteligencia a inspeccionar:"
+        )
+        
+        if update.message:
+            await update.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
+        elif update.callback_query:
+            await update.callback_query.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
+            
+    except Exception as e:
+        error_txt = f"❌ [ERROR S-2 CRÍTICO] Fallo interno en la interfaz:\n`{e}`"
+        print(traceback.format_exc())
+        if update.message:
+            await update.message.reply_text(error_txt, parse_mode="Markdown")
+        elif update.callback_query:
+            await update.callback_query.message.reply_text(error_txt, parse_mode="Markdown")
 
 async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -76,8 +87,9 @@ async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_
         teclado = generar_menu_subnodos(rama_seleccionada)
         nombre_rama_limpio = MAPEO_TACTICO.get(rama_seleccionada, rama_seleccionada.replace("_", " ").upper())
         
+        # CORRECCIÓN MARKDOWN
         await query.edit_message_text(
-            text=f"📂 **DIVISIÓN ACTIVA:**\n*{nombre_rama_limpio}*\n\nSeleccione el archivo específico:",
+            text=f"📂 *DIVISIÓN ACTIVA:*\n*{nombre_rama_limpio}*\n\nSeleccione el archivo específico:",
             reply_markup=teclado,
             parse_mode="Markdown"
         )
@@ -92,8 +104,9 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
     datos = query.data
     if datos == "menu:volver":
         teclado = generar_menu_ramas()
+        # CORRECCIÓN MARKDOWN
         await query.edit_message_text(
-            text="📋 **SISTEMA DE ASISTENCIA DIRECTA S-2**\nSeleccione la categoría de inteligencia:",
+            text="📋 *SISTEMA DE ASISTENCIA DIRECTA S-2*\nSeleccione la categoría de inteligencia:",
             reply_markup=teclado,
             parse_mode="Markdown"
         )
@@ -104,6 +117,7 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
         rama = context.user_data.get("rama_seleccionada", "")
         ruta_completa = f"{rama}/{subnodo_seleccionado}"
         
+        # CORRECCIÓN MARKDOWN
         await query.edit_message_text(f"⚡ *Extrayendo registros de [ {ruta_completa.upper()} ]...*", parse_mode="Markdown")
         
         # Redirección interna sin colisión de dependencias circulares
