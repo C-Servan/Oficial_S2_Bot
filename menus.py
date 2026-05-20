@@ -13,15 +13,17 @@ MAPEO_TACTICO = {
     "2_sistemas": "🎮 SISTEMAS Y EMULADORES",
 }
 
-def generar_menu_ramas() -> InlineKeyboardMarkup:
-    mapa = database.obtener_mapa_superficial()
+def generar_menu_ramas(mapa) -> InlineKeyboardMarkup:
     teclado = []
     
     for rama in sorted(mapa.keys()):
         if rama in MAPEO_TACTICO:
             nombre_elegante = MAPEO_TACTICO[rama]
             teclado.append([InlineKeyboardButton(nombre_elegante, callback_data=f"rama:{rama}")])
-        
+        else:
+            # RADAR DEBUG: Forzar la muestra de carpetas no mapeadas para detectar errores de escritura en Firebase
+            teclado.append([InlineKeyboardButton(f"⚠️ {rama} (No mapeado)", callback_data=f"rama:{rama}")])
+            
     teclado.append([InlineKeyboardButton("❌ CANCELAR CONSULTA", callback_data="menu:cancelar")])
     return InlineKeyboardMarkup(teclado)
 
@@ -38,9 +40,18 @@ def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(teclado)
 
 async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Activa el menú interactivo principal desde comandos o callbacks de reseteo."""
+    """Activa el menú interactivo principal desde comandos o callbacks con telemetría visual."""
     try:
-        teclado = generar_menu_ramas()
+        mapa = database.obtener_mapa_superficial()
+        
+        # TELEMETRÍA EN CALIENTE PARA VER QUÉ LEE REALMENTE DE FIREBASE
+        claves_encontradas = list(mapa.keys())
+        if claves_encontradas:
+            estado_radar = f"🟢 Conexión OK. Carpetas vistas: {claves_encontradas}"
+        else:
+            estado_radar = "🔴 ERROR: La base de datos devuelve 0 carpetas en 'Enciclopedia_S2'."
+
+        teclado = generar_menu_ramas(mapa)
         
         user = update.message.from_user if update.message else update.callback_query.from_user
         username = f"@{user.username}" if user.username else user.first_name
@@ -52,10 +63,10 @@ async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_
         else:
             rango = "Recluta"
 
-        # CORRECCIÓN MARKDOWN: Usamos un solo * para negritas
         mensaje = (
             f"📋 *SISTEMA DE ASISTENCIA DIRECTA S-2*\n"
-            f"{rango}, seleccione el sector de inteligencia a inspeccionar:"
+            f"{rango}, seleccione el sector de inteligencia a inspeccionar:\n\n"
+            f"📡 _Radar S-2:_ `{estado_radar}`"
         )
         
         if update.message:
@@ -87,7 +98,6 @@ async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_
         teclado = generar_menu_subnodos(rama_seleccionada)
         nombre_rama_limpio = MAPEO_TACTICO.get(rama_seleccionada, rama_seleccionada.replace("_", " ").upper())
         
-        # CORRECCIÓN MARKDOWN
         await query.edit_message_text(
             text=f"📂 *DIVISIÓN ACTIVA:*\n*{nombre_rama_limpio}*\n\nSeleccione el archivo específico:",
             reply_markup=teclado,
@@ -103,8 +113,8 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
     
     datos = query.data
     if datos == "menu:volver":
-        teclado = generar_menu_ramas()
-        # CORRECCIÓN MARKDOWN
+        mapa = database.obtener_mapa_superficial()
+        teclado = generar_menu_ramas(mapa)
         await query.edit_message_text(
             text="📋 *SISTEMA DE ASISTENCIA DIRECTA S-2*\nSeleccione la categoría de inteligencia:",
             reply_markup=teclado,
@@ -117,10 +127,8 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
         rama = context.user_data.get("rama_seleccionada", "")
         ruta_completa = f"{rama}/{subnodo_seleccionado}"
         
-        # CORRECCIÓN MARKDOWN
         await query.edit_message_text(f"⚡ *Extrayendo registros de [ {ruta_completa.upper()} ]...*", parse_mode="Markdown")
         
-        # Redirección interna sin colisión de dependencias circulares
         query.data = f"nav:{ruta_completa}"
         import main
         await main.procesar_mensaje(update, context)
