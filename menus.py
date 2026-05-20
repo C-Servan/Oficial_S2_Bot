@@ -1,24 +1,21 @@
-# menus.py
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 import database
+import asyncio
 
 # Definición estricta de los estados de la conversación
 ESTADO_RAMA, ESTADO_SUBNODO = range(2)
 
-# DICCIONARIO TÁCTICO: Títulos optimizados en longitud para evitar cortes y forzar centrado visual
+# DICCIONARIO TÁCTICO
 MAPEO_TACTICO = {
     "1_Manuales_tecnicos": "⚙️ CONFIG. SISTEMAS / LIGHT GUNS",
     "2_Ecosistema_software": "🎮 EMULADORES Y SOFTWARE",
-    # Las ramas "3_Archivo_historico" y "4_Protocolos_unidad" quedan capadas automáticamente al no incluirse aquí
 }
 
 def generar_menu_ramas() -> InlineKeyboardMarkup:
-    """Genera botones limpios basados exclusivamente en el Mapeo Táctico autorizado."""
     mapa = database.obtener_mapa_superficial()
     teclado = []
     
-    # Iteramos solo sobre las ramas permitidas y configuradas en nuestro filtro visual
     for rama in sorted(mapa.keys()):
         if rama in MAPEO_TACTICO:
             nombre_elegante = MAPEO_TACTICO[rama]
@@ -28,13 +25,11 @@ def generar_menu_ramas() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(teclado)
 
 def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
-    """Extrae los subnodos internos y les aplica un formato visual de archivo limpio."""
     mapa = database.obtener_mapa_superficial()
     subnodos = mapa.get(rama, [])
     teclado = []
     
     for subnodo in sorted(subnodos):
-        # Embellecemos el subnodo técnico (ej: "openfire" -> "OPENFIRE")
         nombre_limpio = subnodo.replace("_", " ").upper()
         teclado.append([InlineKeyboardButton(f"📁 [ {nombre_limpio} ]", callback_data=f"subnodo:{subnodo}")])
         
@@ -42,10 +37,8 @@ def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(teclado)
 
 async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_alerta: str) -> int:
-    """Activa el menú interactivo principal cuando no hay coincidencias directas en el texto."""
     teclado = generar_menu_ramas()
     
-    # Se extrae el rango dinámicamente según las directivas del sistema
     user = update.message.from_user if update.message else update.callback_query.from_user
     username = f"@{user.username}" if user.username else user.first_name
     
@@ -68,9 +61,8 @@ async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_
     return ESTADO_RAMA
 
 async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Maneja el clic sobre una rama autorizada y despliega sus subnodos de configuración."""
     query = update.callback_query
-    await query.answer() # Libera el estado de carga en los servidores de Telegram inmediatamente
+    await query.answer()
     
     datos = query.data
     if datos == "menu:cancelar":
@@ -94,9 +86,8 @@ async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_
     return ESTADO_RAMA
 
 async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Maneja el clic sobre el subnodo final, inyecta la solución y cierra la conversación de forma segura."""
     query = update.callback_query
-    await query.answer() # Libera el callback de inmediato para evitar el bucle "Cargando..."
+    await query.answer()
     
     datos = query.data
     if datos == "menu:volver":
@@ -110,20 +101,19 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
         
     if datos.startswith("subnodo:"):
         subnodo_seleccionado = datos.split(":")[1]
+        rama = context.user_data.get("rama_seleccionada", "")
         
-        # Fijamos de forma estricta en la sesión el subnodo elegido para saltar la búsqueda libre
-        context.user_data["forzar_subnodo"] = subnodo_seleccionado
+        # CONSTRUCCIÓN DE RUTA COMPLETA PARA EL SISTEMA
+        ruta_completa = f"{rama}/{subnodo_seleccionado}"
         
-        await query.edit_message_text(f"⚡ *Extrayendo registros de [ {subnodo_seleccionado.upper()} ] y procesando con cascada de IA...*", parse_mode="Markdown")
+        await query.edit_message_text(f"⚡ *Extrayendo registros de [ {ruta_completa.upper()} ]...*", parse_mode="Markdown")
         
-        # EVITAMOS IMPORTACIÓN CIRCULAR: Importamos el procesador principal bajo demanda
         import main
         
-        # Sincronizamos de manera segura el texto para el analizador secundario
+        # Pasamos la ruta completa al procesador
         if query.message:
-            query.message.text = subnodo_seleccionado
+            query.message.text = f"nav:{ruta_completa}"
             
-        # Ejecutamos el procesamiento sin bloquear la máquina de estados nativa de la botonera
         asyncio.create_task(main.procesar_mensaje(update, context))
         
         return ConversationHandler.END
@@ -131,6 +121,5 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
     return ESTADO_SUBNODO
 
 async def cancelar_navegacion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Permite abortar la interfaz del menú interactivo mediante comandos del sistema."""
     await update.message.reply_text("📡 Operación abortada. Regresando a modo de guardia táctica.")
     return ConversationHandler.END
