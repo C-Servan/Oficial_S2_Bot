@@ -56,7 +56,14 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg_obj = update.message
         data = update.message.text.strip()
 
-    # NAVEGACIÓN (Callback)
+    # MEDIDA DE SEGURIDAD: Bloquear comandos residuales que intenten entrar como texto plano
+    if not is_callback and data.startswith("/"):
+        # Si de alguna forma un comando no fue capturado arriba, forzamos su redirección manual
+        if data.startswith("/ayuda"):
+            await menus.activar_encuesta_indice(update, context)
+        return
+
+    # NAVEGACIÓN (Callback de botones)
     if is_callback and data.startswith("nav:"):
         ruta = data.replace("nav:", "")
         datos = database.obtener_datos_nodo(ruta)
@@ -68,14 +75,14 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id=destino_chat_id, text=f"*{datos.get('titulo')}*\n\n{datos.get('texto_manual', '')}", parse_mode="Markdown")
         return
 
-    # CONSULTA ABIERTA (IA - Solo texto, no comandos)
+    # CONSULTA ABIERTA (IA - Solo texto puro)
     if not is_callback:
         respuesta_ia, canal = ai_cascade.procesar_consulta_directa(
             data, 
             str(database.obtener_datos_nodo("GLOBAL")), 
             update.message.from_user.username
         )
-        # Formato de canal solicitado: [Comunicación canal - X]
+        # Formato de canal estricto solicitado
         nombre_canal = canal.replace("Canal ", "").strip()
         await msg_obj.reply_text(f"📡 [Comunicación canal - {nombre_canal}]\n\n{respuesta_ia}", parse_mode="Markdown")
 
@@ -83,20 +90,20 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_bot():
     application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
     
-    # Prioridad 1: Comandos (Capturados directamente)
+    # Prioridad 1: Comandos (Capturados directamente en la raíz)
     application.add_handler(CommandHandler("ayuda", menus.activar_encuesta_indice))
     application.add_handler(CommandHandler("guardar", ejecutar_ingesta))
     
-    # Prioridad 2: Callbacks de navegación
+    # Prioridad 2: Callbacks de navegación de menús intermitentes
     application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^rama:"))
     application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_subnodo, pattern="^subnodo:"))
     application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^menu:"))
     application.add_handler(CallbackQueryHandler(procesar_mensaje, pattern="^nav:"))
     
-    # Prioridad 3: Mensajes de texto (Solo IA)
+    # Prioridad 3: Mensajes de texto (Filtro estricto anti-comandos)
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), procesar_mensaje))
 
-    print("🚀 Oficial S-2 en línea.")
+    print("🚀 Oficial S-2 en línea. Núcleo principal verificado.")
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
