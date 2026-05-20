@@ -1,4 +1,3 @@
-# ai_cascade.py
 import os
 import re
 import time
@@ -31,7 +30,6 @@ def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str, max_tokens
     """
     Ejecuta una solicitud de IA siguiendo estrictamente el orden de prioridad:
     Alpha (Groq) -> Bravo (Mistral) -> Charlie (DeepSeek).
-    Retorna una tupla: (texto_respuesta, canal_utilizado)
     """
     # --- PLAN A: Groq (Canal Alpha) ---
     if client_groq:
@@ -72,64 +70,50 @@ def ejecutar_ia_con_cascada(prompt_sistema: str, prompt_usuario: str, max_tokens
         except Exception as e3:
             print(f"⚠️ [IA CASCADE] Fallo en Canal Charlie (DeepSeek): {e3}")
 
-    # Si todo falla, disparamos una excepción controlada que capturará el módulo principal
-    raise RuntimeError("Todos los canales de procesamiento de IA se encuentran fuera de servicio o saturados.")
+    raise RuntimeError("Todos los canales de IA fuera de servicio.")
 
 def procesar_consulta_directa(mensaje_usuario: str, contexto_real_json: str, username: str) -> tuple:
-    """
-    Prepara los metadatos y el contexto estructurado para lanzarlo a la cascada de IA.
-    Limpia el JSON masivo para evitar desbordamientos de tokens en el prompt de sistema.
-    """
-    # Blindaje de identidad contra datos corruptos u objetos herederos de callbacks de Telegram
+    """Prepara y lanza la consulta a la IA con optimización de contexto."""
+    
     username_limpio = str(username) if username else "Operador Autorizado"
     
+    # NUEVA LÓGICA DE FILTRADO: Si el mensaje parece una ruta de navegación, se gestiona externamente
+    # Esto evita que la IA procese 'nav:1_Lightguns/gun4ir/calibracion' como lenguaje natural
+    if mensaje_usuario.startswith("nav:"):
+        return "Navegación directa detectada. Accediendo a registros estáticos.", "Bypass Interno"
+
     contexto_situacional = (
         f"\n--- METADATOS DE LA TRANSMISIÓN ---\n"
         f"FECHA Y HORA ACTUAL: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
         f"IDENTIDAD DEL REMITENTE: {username_limpio}\n"
-        f"------------------------------------\n"
     )
     
     texto_contexto_limpio = ""
     if contexto_real_json:
         try:
-            json_puro = contexto_real_json
-            # Extracción segura: Localizamos las llaves del objeto JSON ignorando cabeceras
+            # Intentamos limpiar el JSON por si viene con basura de sistema
             inicio_json = contexto_real_json.find('{')
             fin_json = contexto_real_json.rfind('}') + 1
-            if inicio_json != -1 and fin_json != -1:
-                json_puro = contexto_real_json[inicio_json:fin_json]
+            json_puro = contexto_real_json[inicio_json:fin_json] if inicio_json != -1 else contexto_real_json
             
             datos = json.loads(json_puro.strip())
             if isinstance(datos, dict):
                 for clave, valor in datos.items():
                     if clave in ["imagenes_esquema", "videos_tutorial", "ultima_modificacion", "modificado_por"]:
-                        continue # Omitimos metadatos multimedia pesados en el prompt
+                        continue
                     texto_contexto_limpio += f"📂 SECCIÓN: {clave.upper()}\n{valor}\n\n"
             else:
                 texto_contexto_limpio = str(datos)
         except Exception as err_json:
-            print(f"⚠️ [IA CASCADE] No se pudo parsear el contexto como JSON, enviando texto de contingencia: {err_json}")
             texto_contexto_limpio = contexto_real_json[:4000]
 
-    if not texto_contexto_limpio.strip():
-        texto_contexto_limpio = "No se han encontrado registros preexistentes en este nodo de la base de datos."
-
-    # El prompt del sistema dicta la personalidad y metadatos limpios
     prompt_sistema = f"{instrucciones_base}\n{contexto_situacional}"
     
-    # Optimizador de órdenes: Si el input es una sola palabra (un botón como 'retrobat'),
-    # le damos una instrucción imperativa estructurada para guiar a la IA.
-    peticion_operador = mensaje_usuario
-    if mensaje_usuario and len(mensaje_usuario.split()) == 1:
-        peticion_operador = f"Genera, sintetiza y organiza un reporte técnico completo y detallado para el subnodo operativo: {mensaje_usuario}."
-
-    # Construimos el prompt de usuario empaquetando el manual de Firebase de forma segura
     prompt_usuario_estructurado = (
         f"=== MANUALES TÉCNICOS EXTRAÍDOS DE LA BASE DE DATOS S-2 ===\n"
         f"{texto_contexto_limpio}\n"
         f"===========================================================\n\n"
-        f"INSTRUCCIÓN DEL OPERADOR: {peticion_operador}"
+        f"INSTRUCCIÓN DEL OPERADOR: {mensaje_usuario}"
     )
     
     return ejecutar_ia_con_cascada(prompt_sistema, prompt_usuario_estructurado, max_tokens=2048)
