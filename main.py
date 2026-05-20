@@ -9,6 +9,7 @@ from telegram.ext import (
     MessageHandler, 
     CommandHandler, 
     CallbackQueryHandler, 
+    ConversationHandler,
     filters, 
     ContextTypes
 )
@@ -58,21 +59,36 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # MEDIDA DE SEGURIDAD: Bloquear comandos residuales que intenten entrar como texto plano
     if not is_callback and data.startswith("/"):
-        # Si de alguna forma un comando no fue capturado arriba, forzamos su redirección manual
         if data.startswith("/ayuda"):
+            # Si entra por texto plano, inicializamos el flujo interactivo de menús
             await menus.activar_encuesta_indice(update, context)
         return
 
-    # NAVEGACIÓN (Callback de botones)
+    # NAVEGACIÓN (Lectura final de nodos en Firebase)
     if is_callback and data.startswith("nav:"):
         ruta = data.replace("nav:", "")
         datos = database.obtener_datos_nodo(ruta)
         if datos:
+            # Dado que la estructura real tiene subniveles (configuracion, faq), 
+            # verificamos si devuelve texto directo o subcategorías
+            titulo = datos.get('titulo', 'Manual S-2')
+            texto = datos.get('texto_manual', '')
+            
+            if not texto:
+                # Si el nodo contiene más carpetas hijas, listamos sus claves
+                claves_internas = [k.replace("_", " ").upper() for k in datos.keys() if isinstance(datos[k], dict)]
+                if claves_internas:
+                    texto = f"Este sistema contiene las siguientes secciones disponibles:\n" + "\n".join([f"🔹 {c}" for c in claves_internas])
+                else:
+                    texto = "Registro vacío o estructura profunda no indexada."
+
             vids = datos.get('videos', [])
             if vids and "drive.google.com" in vids[0]:
-                await context.bot.send_document(chat_id=destino_chat_id, document=vids[0], caption=f"📄 *{datos.get('titulo')}*")
+                await context.bot.send_document(chat_id=destino_chat_id, document=vids[0], caption=f"📄 *{titulo}*")
             else:
-                await context.bot.send_message(chat_id=destino_chat_id, text=f"*{datos.get('titulo')}*\n\n{datos.get('texto_manual', '')}", parse_mode="Markdown")
+                await context.bot.send_message(chat_id=destino_chat_id, text=f"*{titulo}*\n\n{texto}", parse_mode="Markdown")
+        else:
+            await context.bot.send_message(chat_id=destino_chat_id, text="❌ Archivo no encontrado en el sector especificado.")
         return
 
     # CONSULTA ABIERTA (IA - Solo texto puro)
@@ -82,7 +98,6 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             str(database.obtener_datos_nodo("GLOBAL")), 
             update.message.from_user.username
         )
-        # Formato de canal estricto solicitado
         nombre_canal = canal.replace("Canal ", "").strip()
         await msg_obj.reply_text(f"📡 [Comunicación canal - {nombre_canal}]\n\n{respuesta_ia}", parse_mode="Markdown")
 
@@ -90,20 +105,34 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_bot():
     application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
     
-    # Prioridad 1: Comandos (Capturados directamente en la raíz)
-    application.add_handler(CommandHandler("ayuda", menus.activar_encuesta_indice))
+    # Prioridad 1: Comando Ingesta Directa
     application.add_handler(CommandHandler("guardar", ejecutar_ingesta))
     
-    # Prioridad 2: Callbacks de navegación de menús intermitentes
-    application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^rama:"))
-    application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_subnodo, pattern="^subnodo:"))
-    application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^menu:"))
+    # CONVERSATION HANDLER: Control absoluto del flujo interactivo del menú /ayuda
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("ayuda", menus.activar_encuesta_indice)],
+        states={
+            menus.ESTADO_RAMA: [
+                CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^rama:"),
+                CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^menu:cancelar")
+            ],
+            menus.ESTADO_SUBNODO: [
+                CallbackQueryHandler(menus.procesar_seleccion_subnodo, pattern="^subnodo:"),
+                CallbackQueryHandler(menus.procesar_seleccion_subnodo, pattern="^menu:volver")
+            ]
+        },
+        fallbacks=[CommandHandler("ayuda", menus.activar_encuesta_indice)],
+        allow_reentry=True
+    )
+    application.add_handler(conv_handler)
+    
+    # Callbacks de extracción final de manuales
     application.add_handler(CallbackQueryHandler(procesar_mensaje, pattern="^nav:"))
     
-    # Prioridad 3: Mensajes de texto (Filtro estricto anti-comandos)
+    # Prioridad 3: Mensajes de texto analizados por la IA
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), procesar_mensaje))
 
-    print("🚀 Oficial S-2 en línea. Núcleo principal verificado.")
+    print("🚀 Oficial S-2 en línea. Sistema de Menús Interactivos Sincronizado.")
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
