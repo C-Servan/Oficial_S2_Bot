@@ -36,11 +36,10 @@ def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
     teclado.append([InlineKeyboardButton("⬅️ VOLVER AL ÍNDICE", callback_data="menu:volver")])
     return InlineKeyboardMarkup(teclado)
 
-async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_alerta: str = "Asistencia solicitada") -> int:
-    """Activa el menú interactivo principal."""
+async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Activa el menú interactivo principal (Comando independiente)."""
     teclado = generar_menu_ramas()
     
-    # Determinamos el usuario desde el mensaje o el callback
     user = update.message.from_user if update.message else update.callback_query.from_user
     username = f"@{user.username}" if user.username else user.first_name
     
@@ -60,8 +59,6 @@ async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
     elif update.callback_query:
         await update.callback_query.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
-        
-    return ESTADO_RAMA
 
 async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
