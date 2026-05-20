@@ -37,10 +37,16 @@ def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(teclado)
 
 async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Activa el menú interactivo principal (Comando independiente)."""
+    """Activa el menú interactivo principal. Ajustado para ser llamado sin argumentos extra."""
     teclado = generar_menu_ramas()
     
-    user = update.message.from_user if update.message else update.callback_query.from_user
+    # Determinamos el usuario correctamente
+    user = None
+    if update.message:
+        user = update.message.from_user
+    elif update.callback_query:
+        user = update.callback_query.from_user
+        
     username = f"@{user.username}" if user.username else user.first_name
     
     if username.lower() == "@carlosfservan":
