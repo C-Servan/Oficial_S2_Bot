@@ -52,6 +52,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await update.callback_query.answer()
         except: pass
     else:
+        if not update.message or not update.message.text: return
         msg_obj = update.message
         data = update.message.text.strip()
 
@@ -74,10 +75,12 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             str(database.obtener_datos_nodo("GLOBAL")), 
             update.message.from_user.username
         )
-        # Formato de canal solicitado
+        # Formato de canal solicitado: [Comunicación canal - X]
         nombre_canal = canal.replace("Canal ", "").strip()
         await msg_obj.reply_text(f"📡 [Comunicación canal - {nombre_canal}]\n\n{respuesta_ia}", parse_mode="Markdown")
-        await menus.activar_encuesta_indice(update, context, "Sugerencia")
+        
+        # Invocamos el menú sin argumentos extra para no romper el CommandHandler
+        await menus.activar_encuesta_indice(update, context)
 
 # --- 4. LANZAMIENTO Y CONFIGURACIÓN ---
 async def start_bot():
