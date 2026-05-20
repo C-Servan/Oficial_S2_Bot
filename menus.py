@@ -36,9 +36,11 @@ def generar_menu_subnodos(rama: str) -> InlineKeyboardMarkup:
     teclado.append([InlineKeyboardButton("⬅️ VOLVER AL ÍNDICE", callback_data="menu:volver")])
     return InlineKeyboardMarkup(teclado)
 
-async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_alerta: str) -> int:
+async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_alerta: str = "Asistencia solicitada") -> int:
+    """Activa el menú interactivo principal."""
     teclado = generar_menu_ramas()
     
+    # Determinamos el usuario desde el mensaje o el callback
     user = update.message.from_user if update.message else update.callback_query.from_user
     username = f"@{user.username}" if user.username else user.first_name
     
@@ -50,14 +52,15 @@ async def activar_encuesta_indice(update: Update, context: ContextTypes.DEFAULT_
         rango = "Recluta"
 
     mensaje = (
-        f"⚠️ **REGISTRO NO ENCONTRADO**\n"
-        f"{rango}, los parámetros solicitados no constan en los índices de acceso rápido.\n\n"
         f"📋 **SISTEMA DE ASISTENCIA DIRECTA S-2**\n"
-        f"Por favor, seleccione directamente en la interfaz el sector de inteligencia a inspeccionar:"
+        f"{rango}, seleccione el sector de inteligencia a inspeccionar:"
     )
     
     if update.message:
         await update.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
+    elif update.callback_query:
+        await update.callback_query.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
+        
     return ESTADO_RAMA
 
 async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -77,7 +80,7 @@ async def procesar_seleccion_rama(update: Update, context: ContextTypes.DEFAULT_
         nombre_rama_limpio = MAPEO_TACTICO.get(rama_seleccionada, rama_seleccionada.replace("_", " ").upper())
         
         await query.edit_message_text(
-            text=f"📂 **DIVISIÓN ACTIVA:**\n*{nombre_rama_limpio}*\n\nSeleccione el archivo específico para desplegar el manual táctico:",
+            text=f"📂 **DIVISIÓN ACTIVA:**\n*{nombre_rama_limpio}*\n\nSeleccione el archivo específico:",
             reply_markup=teclado,
             parse_mode="Markdown"
         )
@@ -93,7 +96,7 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
     if datos == "menu:volver":
         teclado = generar_menu_ramas()
         await query.edit_message_text(
-            text="📋 **SISTEMA DE ASISTENCIA DIRECTA S-2**\nSeleccione la categoría de inteligencia que desea inspeccionar:",
+            text="📋 **SISTEMA DE ASISTENCIA DIRECTA S-2**\nSeleccione la categoría de inteligencia:",
             reply_markup=teclado,
             parse_mode="Markdown"
         )
@@ -102,24 +105,19 @@ async def procesar_seleccion_subnodo(update: Update, context: ContextTypes.DEFAU
     if datos.startswith("subnodo:"):
         subnodo_seleccionado = datos.split(":")[1]
         rama = context.user_data.get("rama_seleccionada", "")
-        
-        # CONSTRUCCIÓN DE RUTA COMPLETA PARA EL SISTEMA
         ruta_completa = f"{rama}/{subnodo_seleccionado}"
         
         await query.edit_message_text(f"⚡ *Extrayendo registros de [ {ruta_completa.upper()} ]...*", parse_mode="Markdown")
         
         import main
-        
-        # Pasamos la ruta completa al procesador
         if query.message:
             query.message.text = f"nav:{ruta_completa}"
             
         asyncio.create_task(main.procesar_mensaje(update, context))
-        
         return ConversationHandler.END
 
     return ESTADO_SUBNODO
 
 async def cancelar_navegacion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("📡 Operación abortada. Regresando a modo de guardia táctica.")
+    await update.message.reply_text("📡 Operación abortada.")
     return ConversationHandler.END
