@@ -28,20 +28,20 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- 2. PROCESADOR TÁCTICO (INGESTA Y COMANDOS) ---
+# --- 2. PROCESADORES DE COMANDOS (Prioridad 1) ---
 async def ejecutar_ingesta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja exclusivamente el comando /guardar."""
     data = update.message.text.strip()
     partes = data.replace("/guardar", "").split("|")
     if len(partes) == 5:
         if database.guardar_manual_estructurado(*[p.strip() for p in partes]):
-            await update.message.reply_text("✅ [S-2] Manual inyectado en la base de datos con éxito.")
+            await update.message.reply_text("✅ [S-2] Manual inyectado con éxito.")
         else:
             await update.message.reply_text("❌ [S-2] Error de escritura.")
     else:
         await update.message.reply_text("⚠️ Formato: /guardar ruta | titulo | texto | imgs | vids")
 
-# --- 3. PROCESADOR DE NAVEGACIÓN Y CONSULTA ---
+# --- 3. PROCESADOR DE NAVEGACIÓN Y CONSULTA (Prioridad 2 y 3) ---
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_callback = update.callback_query is not None
     destino_chat_id = update.effective_chat.id
@@ -56,7 +56,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg_obj = update.message
         data = update.message.text.strip()
 
-    # NAVEGACIÓN
+    # NAVEGACIÓN (Callback)
     if is_callback and data.startswith("nav:"):
         ruta = data.replace("nav:", "")
         datos = database.obtener_datos_nodo(ruta)
@@ -68,7 +68,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id=destino_chat_id, text=f"*{datos.get('titulo')}*\n\n{datos.get('texto_manual', '')}", parse_mode="Markdown")
         return
 
-    # CONSULTA ABIERTA (IA)
+    # CONSULTA ABIERTA (IA - Solo texto, no comandos)
     if not is_callback:
         respuesta_ia, canal = ai_cascade.procesar_consulta_directa(
             data, 
@@ -78,25 +78,22 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Formato de canal solicitado: [Comunicación canal - X]
         nombre_canal = canal.replace("Canal ", "").strip()
         await msg_obj.reply_text(f"📡 [Comunicación canal - {nombre_canal}]\n\n{respuesta_ia}", parse_mode="Markdown")
-        
-        # Invocamos el menú sin argumentos extra para no romper el CommandHandler
-        await menus.activar_encuesta_indice(update, context)
 
 # --- 4. LANZAMIENTO Y CONFIGURACIÓN ---
 async def start_bot():
     application = Application.builder().token(ai_cascade.TELEGRAM_TOKEN).build()
     
-    # Prioridad 1: Comandos (Separados del flujo de texto)
+    # Prioridad 1: Comandos (Capturados directamente)
     application.add_handler(CommandHandler("ayuda", menus.activar_encuesta_indice))
     application.add_handler(CommandHandler("guardar", ejecutar_ingesta))
     
     # Prioridad 2: Callbacks de navegación
-    application.add_handler(CallbackQueryHandler(procesar_mensaje, pattern="^nav:"))
     application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^rama:"))
     application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_subnodo, pattern="^subnodo:"))
     application.add_handler(CallbackQueryHandler(menus.procesar_seleccion_rama, pattern="^menu:"))
+    application.add_handler(CallbackQueryHandler(procesar_mensaje, pattern="^nav:"))
     
-    # Prioridad 3: Mensajes de texto (Solo si no son comandos)
+    # Prioridad 3: Mensajes de texto (Solo IA)
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), procesar_mensaje))
 
     print("🚀 Oficial S-2 en línea.")
