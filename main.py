@@ -1,5 +1,7 @@
 import os
 import telebot
+from flask import Flask
+from threading import Thread
 from ai_cascade import procesar_consulta_cascada
 from database import (
     obtener_servicio_drive, 
@@ -12,14 +14,14 @@ from database import (
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CARPETA_RAIZ_MANUALES_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
 
-# Inicialización obligatoria del bot
+# Validación crítica de la línea de suministro
 if not TOKEN or not CARPETA_RAIZ_MANUALES_ID:
-    raise ValueError("🚨 [CRÍTICO] Faltan variables de entorno esenciales (TELEGRAM_BOT_TOKEN o GOOGLE_DRIVE_FOLDER_ID).")
+    raise ValueError("🚨 [CRÍTICO] Faltan variables de entorno esenciales (TELEGRAM_BOT_TOKEN o GOOGLE_DRIVE_FOLDER_ID) en Render.")
 
 bot = telebot.TeleBot(TOKEN)
 
 # --- CADENA DE MANDO (IDs DE TELEGRAM) ---
-# REQUISITO: Modifique estos IDs con sus números reales de Telegram
+# REQUISITO RECOMENDADO: Edite estos IDs con sus números reales de Telegram
 COMANDANTE_ID = 123456789  
 SARGENTOS_IDS = [987654321, 555666777]  
 
@@ -34,8 +36,8 @@ def obtener_rango_usuario(user_id):
 def buscar_contexto_en_drive(consulta_usuario):
     """
     RAG (Generación Aumentada por Recuperación):
-    Busca palabras clave en los nombres de los archivos dentro del Drive 
-    para extraer el manual correcto antes de enviárselo a la IA.
+    Busca palabras clave en los nombres de los archivos dentro de Drive 
+    para extraer el manual correcto antes de enviárselo a la cascada de IA.
     """
     service = obtener_servicio_drive()
     if not service:
@@ -70,7 +72,7 @@ def buscar_contexto_en_drive(consulta_usuario):
 
 @bot.message_handler(commands=['start', 'help'])
 def enviar_bienvenida(message):
-    """Mensaje de inicio del bot con formato S-2"""
+    """Mensaje de inicio del bot con formato oficial S-2"""
     rango = obtener_rango_usuario(message.from_user.id)
     saludo = f"🫡 ¡A sus órdenes, {rango.capitalize()}!\n\n"
     saludo += "Oficial S-2 en línea. Central técnica de Lightguns y Emulación operativa.\n"
@@ -127,7 +129,7 @@ def comando_aprender(message):
 @bot.message_handler(func=lambda message: True)
 def escuchar_consultas(message):
     """Intercepta cualquier mensaje de texto, busca en Drive y responde con la cascada de IA"""
-    # Ignorar comandos
+    # Ignorar comandos si entran por aquí
     if message.text.startswith('/'):
         return
         
@@ -147,7 +149,26 @@ def escuchar_consultas(message):
     # Paso 3: Entregar la respuesta al frente de batalla
     bot.reply_to(message, respuesta_final, parse_mode="Markdown")
 
+# --- PARCHE DE COMPATIBILIDAD PARA RENDER (FLASK DUMMY SERVER) ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Oficial S-2: Servidor en línea y operativo."
+
+def run():
+    # Render asigna automáticamente un puerto en la variable de entorno PORT
+    puerto = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=puerto)
+
+def mantener_vivo():
+    t = Thread(target=run)
+    t.start()
+
 # --- ARRANQUE SEGURO DEL MOTOR ---
 if name == "__main__":
+    print("🌐 [SISTEMA] Activando servidor de flancos para Render...")
+    mantener_vivo()  # Engaña a Render diciendo "estoy escuchando el puerto web"
+    
     print("🚀 [SISTEMA] Oficial S-2 desplegado con éxito. Escuchando frecuencias de Telegram...")
     bot.infinity_polling()
