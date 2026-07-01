@@ -166,7 +166,7 @@ def mantener_vivo():
     t.start()
 
 # --- ARRANQUE SEGURO DEL MOTOR ---
-if name == "__main__":
+if __name__ == "__main__":
     print("🌐 [SISTEMA] Activando servidor de flancos para Render...")
     mantener_vivo()  # Engaña a Render diciendo "estoy escuchando el puerto web"
     
