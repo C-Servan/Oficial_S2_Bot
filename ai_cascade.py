@@ -39,7 +39,7 @@ def intentar_gemini(system_prompt, user_message):
     raise Exception(f"Gemini fuera de línea. Estado HTTP: {response.status_code}")
 
 def intentar_groq(system_prompt, user_message):
-    """Línea de Defensa 2: Groq (Actualizado a Llama 3.3 70B Versatile)"""
+    """Línea de Defensa 2: Groq (Llama 3.3 70B Versatile)"""
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise Exception("API Key de Groq no configurada.")
@@ -47,7 +47,7 @@ def intentar_groq(system_prompt, user_message):
     # Inicialización segura dentro del flujo de ejecución (lazy loading)
     client = Groq(api_key=api_key)
     completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",  # <-- Modelo vigente y ultrapotente de 70B
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
@@ -57,7 +57,7 @@ def intentar_groq(system_prompt, user_message):
     return completion.choices[0].message.content
 
 def intentar_deepseek_openrouter(system_prompt, user_message):
-    """Línea de Defensa 3: DeepSeek Chat vía OpenRouter (Slug Estable)"""
+    """Línea de Defensa 3: DeepSeek Chat vía OpenRouter (Económico/Gratuito)"""
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         raise Exception("API Key de OpenRouter no configurada.")
@@ -70,7 +70,7 @@ def intentar_deepseek_openrouter(system_prompt, user_message):
         "X-Title": "Oficial S2 Bot"
     }
     payload = {
-        "model": "deepseek/deepseek-chat",  # <-- Apuntar al slug principal es más estable ante cambios de OpenRouter
+        "model": "deepseek/deepseek-chat",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
@@ -94,21 +94,24 @@ def procesar_consulta_cascada(rango, mensaje_usuario, contexto_drive="No hay man
     
     # --- EJECUCIÓN DEL PROTOCOLO DE CASCADA ---
     
-    # TIER 1: Gemini (Cerebro masivo para devorar manuales de Drive)
+    # TIER 1: Canal Alfa
     try:
-       return intentar_gemini(system_prompt, mensaje_formateado)
+        respuesta = intentar_gemini(system_prompt, mensaje_formateado)
+        return f"🟢 *[Canal Alfa]*\n\n{respuesta}"
     except Exception as e:
         print(f"⚠️ [FALLO TIER 1] {e} -> Desplegando contramedidas: Activando Tier 2...")
         
-        # TIER 2: Groq (Velocidad de respuesta pura si Gemini se satura)
+        # TIER 2: Canal Bravo
         try:
-            return intentar_groq(system_prompt, mensaje_formateado)
+            respuesta = intentar_groq(system_prompt, mensaje_formateado)
+            return f"⚡ *[Canal Bravo]*\n\n{respuesta}"
         except Exception as e:
             print(f"⚠️ [FALLO TIER 2] {e} -> Desplegando última línea de defensa: Activando Tier 3...")
             
-            # TIER 3: DeepSeek vía OpenRouter (Ingeniería de respaldo lógica)
+            # TIER 3: Canal Charlie
             try:
-                return intentar_deepseek_openrouter(system_prompt, mensaje_formateado)
+                respuesta = intentar_deepseek_openrouter(system_prompt, mensaje_formateado)
+                return f"🔵 *[Canal Charlie]*\n\n{respuesta}"
             except Exception as e:
                 # Blindaje absoluto ante un colapso general de internet o APIs
                 print(f"🚨 [CRÍTICO] Colapso total de la cascada de IA: {e}")
