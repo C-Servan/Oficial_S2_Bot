@@ -39,7 +39,7 @@ def intentar_gemini(system_prompt, user_message):
     raise Exception(f"Gemini fuera de línea. Estado HTTP: {response.status_code}")
 
 def intentar_groq(system_prompt, user_message):
-    """Línea de Defensa 2: Groq (Llama 3 70B)"""
+    """Línea de Defensa 2: Groq (Actualizado a Llama 3.3 70B Versatile)"""
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise Exception("API Key de Groq no configurada.")
@@ -47,7 +47,7 @@ def intentar_groq(system_prompt, user_message):
     # Inicialización segura dentro del flujo de ejecución (lazy loading)
     client = Groq(api_key=api_key)
     completion = client.chat.completions.create(
-        model="llama3-70b-8192",
+        model="llama-3.3-70b-versatile",  # <-- Modelo vigente y ultrapotente de 70B
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
@@ -57,7 +57,7 @@ def intentar_groq(system_prompt, user_message):
     return completion.choices[0].message.content
 
 def intentar_deepseek_openrouter(system_prompt, user_message):
-    """Línea de Defensa 3: DeepSeek Chat vía OpenRouter (Económico/Gratuito)"""
+    """Línea de Defensa 3: DeepSeek Chat vía OpenRouter (Slug Estable)"""
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         raise Exception("API Key de OpenRouter no configurada.")
@@ -70,7 +70,7 @@ def intentar_deepseek_openrouter(system_prompt, user_message):
         "X-Title": "Oficial S2 Bot"
     }
     payload = {
-        "model": "deepseek/deepseek-chat:free",
+        "model": "deepseek/deepseek-chat",  # <-- Apuntar al slug principal es más estable ante cambios de OpenRouter
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
