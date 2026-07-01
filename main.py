@@ -170,5 +170,12 @@ if __name__ == "__main__":
     print("🌐 [SISTEMA] Activando servidor de flancos para Render...")
     mantener_vivo()  # Engaña a Render diciendo "estoy escuchando el puerto web"
     
-    print("🚀 [SISTEMA] Oficial S-2 desplegado con éxito. Escuchando frecuencias de Telegram...")
-    bot.infinity_polling(drop_pending_updates=True)
+    print("🧹 [SISTEMA] Purgando el búfer de Telegram para eliminar duplicados...")
+    try:
+        # Esto elimina el proceso fantasma y limpia los mensajes acumulados de golpe
+        bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        print(f"⚠️ [SISTEMA] Nota de purga: {e}")
+    
+    print("🚀 [SISTEMA] Oficial S-2 desplegado con éxito. Escuchando frecuencias...")
+    bot.infinity_polling()
