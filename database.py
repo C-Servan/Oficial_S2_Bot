@@ -114,7 +114,7 @@ def crear_documento_autonomo(folder_id, titulo, contenido):
     
     # Conversión segura a flujo de bytes para evitar fallos de transmisión
     bytes_contenido = io.BytesIO(contenido.encode('utf-8'))
-    media = MediaIoBaseUpload(bytes_contenido, mimeType='text/plain', resumable=True)
+    media = MediaIoBaseUpload(bytes_contenido, mimetype='text/plain', resumable=True)
     
     try:
         file = service.files().create(
