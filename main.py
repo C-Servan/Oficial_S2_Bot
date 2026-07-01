@@ -171,4 +171,4 @@ if __name__ == "__main__":
     mantener_vivo()  # Engaña a Render diciendo "estoy escuchando el puerto web"
     
     print("🚀 [SISTEMA] Oficial S-2 desplegado con éxito. Escuchando frecuencias de Telegram...")
-    bot.infinity_polling()
+    bot.infinity_polling(drop_pending_updates=True)
