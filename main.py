@@ -22,8 +22,8 @@ bot = telebot.TeleBot(TOKEN)
 
 # --- CADENA DE MANDO (IDs DE TELEGRAM) ---
 # REQUISITO RECOMENDADO: Edite estos IDs con sus números reales de Telegram
-COMANDANTE_ID = 123456789  
-SARGENTOS_IDS = [987654321, 555666777]  
+COMANDANTE_ID = 1596889771  
+SARGENTOS_IDS = [953225999, 162691919]  
 
 def obtener_rango_usuario(user_id):
     """Filtra el ID de Telegram y devuelve el rango militar correspondiente"""
