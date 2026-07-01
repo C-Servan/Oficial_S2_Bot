@@ -11,7 +11,7 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 def obtener_servicio_drive():
     """Inicializa de forma segura el cliente de la API de Google Drive"""
     if not os.path.exists(CREDENTIALS_PATH):
-        print("🚨 [CRÍTICO] Archivo de credenciales de Google Drive no encontrado en Render.")
+        print("🚨 [CRÍTICO] Archivo de credenciales de Google Drive no encontrado en Render.", flush=True)
         return None
     try:
         creds = service_account.Credentials.from_service_account_file(
@@ -19,7 +19,7 @@ def obtener_servicio_drive():
         )
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        print(f"🚨 [ERROR] Fallo al autenticar con Google Cloud: {e}")
+        print(f"🚨 [ERROR] Fallo al autenticar con Google Cloud: {e}", flush=True)
         return None
 
 def listar_contenido_carpeta(folder_id):
@@ -40,7 +40,7 @@ def listar_contenido_carpeta(folder_id):
         ).execute()
         return results.get('files', [])
     except Exception as e:
-        print(f"⚠️ [ERROR] No se pudo listar la carpeta {folder_id}: {e}")
+        print(f"⚠️ [ERROR] No se pudo listar la carpeta {folder_id}: {e}", flush=True)
         return []
 
 def buscar_subcarpeta_por_nombre(parent_id, nombre_subcarpeta):
@@ -63,10 +63,10 @@ def buscar_subcarpeta_por_nombre(parent_id, nombre_subcarpeta):
             # Retorna la primera coincidencia válida del árbol
             return carpeta['id']
             
-        print(f"⚠️ [SISTEMA] Sector '{nombre_subcarpeta}' no encontrado en el almacenamiento.")
+        print(f"⚠️ [SISTEMA] Sector '{nombre_subcarpeta}' no encontrado en el almacenamiento.", flush=True)
         return None
     except Exception as e:
-        print(f"🚨 [ERROR] Fallo crítico al rastrear subcarpetas: {e}")
+        print(f"🚨 [ERROR] Fallo crítico al rastrear subcarpetas: {e}", flush=True)
         return None
 
 def leer_texto_de_documento(file_id, mime_type):
@@ -94,7 +94,7 @@ def leer_texto_de_documento(file_id, mime_type):
             
         return fh.getvalue().decode('utf-8', errors='ignore')
     except Exception as e:
-        print(f"⚠️ [ERROR] Imposible leer el contenido del archivo {file_id}: {e}")
+        print(f"⚠️ [ERROR] Imposible leer el contenido del archivo {file_id}: {e}", flush=True)
         return ""
 
 def crear_documento_autonomo(folder_id, titulo, contenido):
@@ -122,8 +122,8 @@ def crear_documento_autonomo(folder_id, titulo, contenido):
             media_body=media,
             fields='id'
         ).execute()
-        print(f"🗄️ [SISTEMA] Nuevo conocimiento archivado con éxito en Drive. ID: {file.get('id')}")
+        print(f"🗄️ [SISTEMA] Nuevo conocimiento archivado con éxito en Drive. ID: {file.get('id')}", flush=True)
         return True
     except Exception as e:
-        print(f"🚨 [ERROR] El protocolo de auto-aprendizaje falló al escribir en Drive: {e}")
+        print(f"🚨 [ERROR] El protocolo de auto-aprendizaje falló al escribir en Drive: {e}", flush=True)
         return False
