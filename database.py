@@ -133,3 +133,62 @@ def crear_documento_autonomo(folder_id, titulo, contenido):
     except Exception as e:
         print(f"🚨 [ERROR] El protocolo de auto-aprendizaje falló al escribir en Drive: {e}", flush=True)
         return False
+
+# --- NUEVOS COMPONENTES TÁCTICOS PARA ENTRADA MULTINIVEL ---
+
+def _obtener_o_crear_subcarpeta_interna(service, nombre_carpeta, padre_id):
+    """Busca una subcarpeta por nombre exacto dentro de un padre. Si no existe, la crea."""
+    query = (
+        f"name = '{nombre_carpeta}' and "
+        f"'{padre_id}' in parents and "
+        f"mimeType = 'application/vnd.google-apps.folder' and "
+        f"trashed = false"
+    )
+    try:
+        resultados = service.files().list(q=query, fields="files(id)").execute().get('files', [])
+        if resultados:
+            return resultados[0]['id']
+        
+        # Si no existe, se construye en el acto
+        meta_carpeta = {
+            'name': nombre_carpeta,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [padre_id]
+        }
+        nueva_carpeta = service.files().create(body=meta_carpeta, fields='id').execute()
+        print(f"📁 [SISTEMA] Subcarpeta estructurada sobre la marcha: {nombre_carpeta}", flush=True)
+        return nueva_carpeta.get('id')
+    except Exception as e:
+        print(f"🚨 [ERROR] No se pudo verificar/crear la subcarpeta '{nombre_carpeta}': {e}", flush=True)
+        return padre_id
+
+def crear_documento_en_ruta(carpeta_raiz_id, ruta_sectores, titulo, contenido):
+    """
+    Resuelve una ruta completa tipo 'gun4ir/config/leds' nivel por nivel.
+    Crea las carpetas que falten y archiva el documento técnico en el destino final.
+    """
+    service = obtener_servicio_drive()
+    if not service:
+        return False
+        
+    try:
+        # Validación de seguridad por si se solicita la raíz directo
+        if not ruta_sectores or ruta_sectores.strip() in ['raiz', 'root', '/']:
+            id_destino_final = carpeta_raiz_id
+        else:
+            # Segmentar la ruta ignorando espacios o barras duplicadas accidentales
+            partes_ruta = [p.strip() for p in ruta_sectores.split('/') if p.strip()]
+            id_actual = carpeta_raiz_id
+            
+            # Navegación y construcción en cadena (Efecto Cascada de Directorios)
+            for parte in partes_ruta:
+                id_actual = _obtener_o_crear_subcarpeta_interna(service, parte, id_actual)
+            
+            id_destino_final = id_actual
+            
+        # Reutiliza el protocolo nativo de subida de archivos en el ID resultante
+        return crear_documento_autonomo(id_destino_final, titulo, contenido)
+        
+    except Exception as e:
+        print(f"🚨 [ERROR] Fallo general en el resolvedor de rutas multinivel: {e}", flush=True)
+        return False
