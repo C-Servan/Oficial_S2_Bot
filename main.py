@@ -9,9 +9,7 @@ from ai_cascade import procesar_consulta_cascada
 import scraper
 from database import (
     obtener_servicio_drive, 
-    buscar_subcarpeta_por_nombre, 
     leer_texto_de_documento, 
-    crear_documento_autonomo,
     crear_documento_en_ruta,
     crear_acceso_youtube_en_ruta,
     subir_archivo_binario_en_ruta
@@ -114,7 +112,12 @@ def comando_aprender(message):
 
         # Es un enlace
         if "http://" in texto_evaluar or "https://" in texto_evaluar:
-            url_objetivo = [p for p in texto_evaluar.split() if p.startswith("http")][0]
+            urls = [p for p in texto_evaluar.split() if p.startswith("http")]
+            if not urls:
+                bot.reply_to(message, "❌ No se pudo extraer un enlace válido.")
+                return
+                
+            url_objetivo = urls[0]
             
             if "youtube.com" in url_objetivo or "youtu.be" in url_objetivo:
                 msg_espera = bot.reply_to(message, "📡 Analizando metadatos de YouTube...")
@@ -189,7 +192,6 @@ def escuchar_consultas(message):
     
     bot.send_chat_action(message.chat.id, 'typing')
     
-    # ❌ ESTO ES LO QUE HABÍA COMENTADO POR ERROR. YA ESTÁ ACTIVO:
     # Paso 1: Extraer el contexto real desde los manuales de Google Drive (RAG)
     contexto_manual = buscar_contexto_en_drive(consulta)
     
