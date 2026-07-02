@@ -7,7 +7,8 @@ from database import (
     obtener_servicio_drive, 
     buscar_subcarpeta_por_nombre, 
     leer_texto_de_documento, 
-    crear_documento_autonomo
+    crear_documento_autonomo,
+    crear_documento_en_ruta  # Nuevo componente táctico para resolver subcarpetas multinivel
 )
 
 # --- CONFIGURACIÓN DE VARIABLES DE ENTORNO ---
@@ -78,14 +79,14 @@ def enviar_bienvenida(message):
     saludo += "Oficial S-2 en línea. Central técnica de Lightguns y Emulación operativa.\n"
     saludo += "• Formule su consulta técnica directamente en el chat.\n"
     if rango in ["comandante", "sargento"]:
-        saludo += "• Comando de archivo activo: `/aprender [carpeta] [titulo] [contenido]`"
+        saludo += "• Comando de archivo activo: `/aprender [ruta/subcarpetas] [titulo] [contenido]`"
     bot.reply_to(message, saludo, parse_mode="Markdown")
 
 @bot.message_handler(commands=['aprender'])
 def comando_aprender(message):
     """
-    Protocolo de Auto-Aprendizaje. Organiza los manuales en subcarpetas específicas.
-    Formato: /aprender [subcarpeta] [titulo] [contenido]
+    Protocolo de Auto-Aprendizaje. Organiza los manuales en subcarpetas específicas y profundas.
+    Formato: /aprender [ruta/subcarpeta/subsubcarpeta] [titulo] [contenido]
     """
     user_id = message.from_user.id
     rango = obtener_rango_usuario(user_id)
@@ -100,31 +101,22 @@ def comando_aprender(message):
     partes = argumentos.strip().split(" ", 2) if argumentos else []
     
     if len(partes) < 3:
-        bot.reply_to(message, "⚠️ [SISTEMA] Sintaxis incorrecta. Ordene: `/aprender [carpeta_destino] [titulo_archivo] [contenido técnico]`\n\n*Ejemplo:* `/aprender gun4ir leds_error Colocar los leds en orden...`", parse_mode="Markdown")
+        bot.reply_to(message, "⚠️ [SISTEMA] Sintaxis incorrecta. Ordene: `/aprender [ruta/subcarpetas] [titulo_archivo] [contenido técnico]`\n\n*Ejemplo:* `/aprender gun4ir/config/errores leds_error Colocar los leds en orden...`", parse_mode="Markdown")
         return
         
-    subcarpeta_nombre = partes[0]
+    ruta_sectores = partes[0]  # Ahora puede recibir estructuras como 'emulacion/batocera/bios'
     titulo_nuevo = partes[1]
     contenido_nuevo = partes[2]
     
-    bot.send_message(message.chat.id, f"💾 [SISTEMA] {rango.upper()} ordenó indexar datos en el sector: {subcarpeta_nombre}. Localizando coordenadas...", parse_mode="Markdown")
+    bot.send_message(message.chat.id, f"💾 [SISTEMA] {rango.upper()} ordenó indexar datos en el sector: `{ruta_sectores}`. Escaneando y creando árbol de directorios...", parse_mode="Markdown")
     
-    # Rastrear dinámicamente la subcarpeta correspondiente (ej. 'gun4ir' o 'batocera')
-    carpeta_destino_id = buscar_subcarpeta_por_nombre(CARPETA_RAIZ_MANUALES_ID, subcarpeta_nombre)
-    
-    # Redirección de emergencia a la raíz si la subcarpeta no existe
-    if not carpeta_destino_id:
-        print(f"⚠️ Sector '{subcarpeta_nombre}' no localizado. Derivando a carpeta raíz.")
-        carpeta_destino_id = CARPETA_RAIZ_MANUALES_ID
-        titulo_nuevo = f"{subcarpeta_nombre}_{titulo_nuevo}"
-        
-    # Guardar de forma remota en Google Drive
-    exito = crear_documento_autonomo(carpeta_destino_id, titulo_nuevo, contenido_nuevo)
+    # Guardar de forma remota en Google Drive resolviendo dinámicamente toda la ruta
+    exito = crear_documento_en_ruta(CARPETA_RAIZ_MANUALES_ID, ruta_sectores, titulo_nuevo, contenido_nuevo)
     
     if exito:
-        bot.reply_to(message, f"🗄️ [LOG] Almacenamiento completado. El conocimiento técnico *'{titulo_nuevo}'* ha sido archivado en el sector de destino: {subcarpeta_nombre}.", parse_mode="Markdown")
+        bot.reply_to(message, f"🗄️ [LOG] Almacenamiento completado. El conocimiento técnico *'{titulo_nuevo}'* ha sido archivado con éxito en la ruta de destino: `{ruta_sectores}`.", parse_mode="Markdown")
     else:
-        bot.reply_to(message, "🚨 [ERROR] El ala de almacenamiento de Drive no responde. Revise las credenciales en Render.")
+        bot.reply_to(message, "🚨 [ERROR] El ala de almacenamiento de Drive no respondió correctamente o el token OAuth2 rechazó la creación de las subcarpetas. Revise Render.", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: True)
 def escuchar_consultas(message):
