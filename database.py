@@ -1,194 +1,135 @@
 import os
 import io
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
+import json
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseUpload
+from google.oauth2 import service_account
 
-# Ruta del archivo secreto en los servidores de Render
-CREDENTIALS_PATH = "/etc/secrets/google_creds.json"
+# Permisos requeridos para operar en Google Drive
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
 def obtener_servicio_drive():
-    """Inicializa el cliente de Drive utilizando el nuevo protocolo OAuth2 de usuario"""
-    if not os.path.exists(CREDENTIALS_PATH):
-        print("🚨 [CRÍTICO] Archivo de credenciales no encontrado en Render.", flush=True)
-        return None
+    """Establece la conexión autenticada con la API de Google Drive."""
+    creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
     try:
-        # Carga el token de usuario que acabamos de generar
-        creds = Credentials.from_authorized_user_file(CREDENTIALS_PATH, SCOPES)
-        
-        # Si el token de acceso rápido caduca, Google lo refresca solo en segundo plano
-        if creds and creds.expired and creds.refresh_token:
-            print("🔄 [SISTEMA] Token de acceso caducado. Refrescando credenciales...", flush=True)
-            creds.refresh(Request())
-            
+        if creds_json:
+            # Configuración para producción en Render (Variable de entorno)
+            info = json.loads(creds_json)
+            creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        elif os.path.exists('credentials.json'):
+            # Configuración para pruebas en entorno local
+            creds = service_account.Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
+        else:
+            print("🚨 [DATABASE] No se detectaron credenciales autorizadas para Google Drive.", flush=True)
+            return None
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        print(f"🚨 [ERROR] Fallo al autenticar con el protocolo OAuth2: {e}", flush=True)
+        print(f"🚨 [DATABASE] Error crítico en la pasarela de autenticación de Drive: {e}", flush=True)
         return None
 
-def listar_contenido_carpeta(folder_id):
-    """
-    Lista subcarpetas y archivos de una carpeta específica de Drive.
-    Útil para construir los menús dinámicos de botones en Telegram.
-    """
-    service = obtener_servicio_drive()
-    if not service:
-        return []
-        
-    query = f"'{folder_id}' in parents and trashed = false"
+def _obtener_o_crear_subcarpeta_interna(service, nombre_carpeta, id_padre):
+    """Módulo interno: Busca una carpeta por nombre dentro de un directorio padre. Si no existe, la construye."""
+    query = f"name = '{nombre_carpeta}' and '{id_padre}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
     try:
-        results = service.files().list(
-            q=query,
-            fields="files(id, name, mimeType)",
-            orderBy="name"
-        ).execute()
-        return results.get('files', [])
-    except Exception as e:
-        print(f"⚠️ [ERROR] No se pudo listar la carpeta {folder_id}: {e}", flush=True)
-        return []
-
-def buscar_subcarpeta_por_nombre(parent_id, nombre_subcarpeta):
-    """
-    Rastrea el Drive para encontrar el ID de una subcarpeta específica
-    (ej. 'gun4ir' o 'batocera') dentro de la jerarquía del servidor.
-    """
-    service = obtener_servicio_drive()
-    if not service:
-        return None
+        resultados = service.files().list(q=query, fields="files(id)").execute()
+        archivos = resultados.get('files', [])
         
-    query = (f"mimeType = 'application/vnd.google-apps.folder' and "
-             f"name contains '{nombre_subcarpeta}' and "
-             f"trashed = false")
-    try:
-        results = service.files().list(q=query, fields="files(id, name, parents)").execute()
-        carpetas = results.get('files', [])
-        
-        for carpeta in carpetas:
-            # Retorna la primera coincidencia válida del árbol
-            return carpeta['id']
+        if archivos:
+            return archivos[0]['id'] # Retorna la carpeta existente
             
-        print(f"⚠️ [SISTEMA] Sector '{nombre_subcarpeta}' no encontrado en el almacenamiento.", flush=True)
-        return None
-    except Exception as e:
-        print(f"🚨 [ERROR] Fallo crítico al rastrear subcarpetas: {e}", flush=True)
-        return None
-
-def leer_texto_de_documento(file_id, mime_type):
-    """
-    Extrae el contenido de texto para alimentar la cascada de IA.
-    Soporta archivos .txt nativos y Documentos de Google (Google Docs).
-    """
-    service = obtener_servicio_drive()
-    if not service:
-        return ""
-        
-    try:
-        # Si es un Google Doc nativo, lo exportamos sobre la marcha a texto plano
-        if mime_type == 'application/vnd.google-apps.document':
-            request = service.files().export_media(fileId=file_id, mimeType='text/plain')
-        else:
-            # Si es un archivo de texto estándar (.txt)
-            request = service.files().get_media(fileId=file_id)
-            
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
-            
-        return fh.getvalue().decode('utf-8', errors='ignore')
-    except Exception as e:
-        print(f"⚠️ [ERROR] Imposible leer el contenido del archivo {file_id}: {e}", flush=True)
-        return ""
-
-def crear_documento_autonomo(folder_id, titulo, contenido):
-    """
-    [PROTOCOLO DE AUTO-APRENDIZAJE]
-    Crea un nuevo archivo de texto en la carpeta de Drive especificada.
-    Usa flujos de bytes en memoria (io.BytesIO) para blindar la estabilidad en Render.
-    """
-    service = obtener_servicio_drive()
-    if not service:
-        return False
-        
-    metadata = {
-        'name': f"{titulo}.txt",
-        'parents': [folder_id]
-    }
-    
-    # Conversión segura a flujo de bytes para evitar fallos de transmisión
-    bytes_contenido = io.BytesIO(contenido.encode('utf-8'))
-    media = MediaIoBaseUpload(bytes_contenido, mimetype='text/plain', resumable=True)
-    
-    try:
-        file = service.files().create(
-            body=metadata,
-            media_body=media,
-            fields='id'
-        ).execute()
-        print(f"🗄️ [SISTEMA] Nuevo conocimiento archivado con éxito en Drive. ID: {file.get('id')}", flush=True)
-        return True
-    except Exception as e:
-        print(f"🚨 [ERROR] El protocolo de auto-aprendizaje falló al escribir en Drive: {e}", flush=True)
-        return False
-
-# --- NUEVOS COMPONENTES TÁCTICOS PARA ENTRADA MULTINIVEL ---
-
-def _obtener_o_crear_subcarpeta_interna(service, nombre_carpeta, padre_id):
-    """Busca una subcarpeta por nombre exacto dentro de un padre. Si no existe, la crea."""
-    query = (
-        f"name = '{nombre_carpeta}' and "
-        f"'{padre_id}' in parents and "
-        f"mimeType = 'application/vnd.google-apps.folder' and "
-        f"trashed = false"
-    )
-    try:
-        resultados = service.files().list(q=query, fields="files(id)").execute().get('files', [])
-        if resultados:
-            return resultados[0]['id']
-        
-        # Si no existe, se construye en el acto
-        meta_carpeta = {
+        # Protocolo de creación si el sector no existe
+        metadata = {
             'name': nombre_carpeta,
             'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [padre_id]
+            'parents': [id_padre]
         }
-        nueva_carpeta = service.files().create(body=meta_carpeta, fields='id').execute()
-        print(f"📁 [SISTEMA] Subcarpeta estructurada sobre la marcha: {nombre_carpeta}", flush=True)
-        return nueva_carpeta.get('id')
+        subcarpeta = service.files().create(body=metadata, fields='id').execute()
+        return subcarpeta.get('id')
     except Exception as e:
-        print(f"🚨 [ERROR] No se pudo verificar/crear la subcarpeta '{nombre_carpeta}': {e}", flush=True)
-        return padre_id
+        print(f"🚨 [DATABASE] Error al resolver subcarpeta '{nombre_carpeta}': {e}", flush=True)
+        return id_padre
 
-def crear_documento_en_ruta(carpeta_raiz_id, ruta_sectores, titulo, contenido):
-    """
-    Resuelve una ruta completa tipo 'gun4ir/config/leds' nivel por nivel.
-    Crea las carpetas que falten y archiva el documento técnico en el destino final.
-    """
+def crear_documento_en_ruta(carpeta_raiz_id, ruta_sectores, nombre_archivo, contenido):
+    """Crea o actualiza un archivo de texto plano (.txt) en una ruta multinivel dinámica."""
     service = obtener_servicio_drive()
     if not service:
         return False
-        
     try:
-        # Validación de seguridad por si se solicita la raíz directo
+        # Resolver el cuartel de destino final analizando la ruta por niveles
         if not ruta_sectores or ruta_sectores.strip() in ['raiz', 'root', '/']:
             id_destino_final = carpeta_raiz_id
         else:
-            # Segmentar la ruta ignorando espacios o barras duplicadas accidentales
             partes_ruta = [p.strip() for p in ruta_sectores.split('/') if p.strip()]
             id_actual = carpeta_raiz_id
-            
-            # Navegación y construcción en cadena (Efecto Cascada de Directorios)
             for parte in partes_ruta:
                 id_actual = _obtener_o_crear_subcarpeta_interna(service, parte, id_actual)
-            
             id_destino_final = id_actual
-            
-        # Reutiliza el protocolo nativo de subida de archivos en el ID resultante
-        return crear_documento_autonomo(id_destino_final, titulo, contenido)
+
+        if not nombre_archivo.endswith('.txt'):
+            nombre_archivo += '.txt'
+
+        metadata = {
+            'name': nombre_archivo,
+            'parents': [id_destino_final]
+        }
         
+        # Conversión del texto a flujo de transmisión en memoria RAM
+        flujo_memoria = io.BytesIO(contenido.encode('utf-8'))
+        media = MediaIoBaseUpload(flujo_memoria, mimetype='text/plain', resumable=True)
+        
+        file = service.files().create(body=metadata, media_body=media, fields='id').execute()
+        print(f"📝 [DATABASE] Archivo de texto creado con éxito. ID: {file.get('id')}", flush=True)
+        return True
     except Exception as e:
-        print(f"🚨 [ERROR] Fallo general en el resolvedor de rutas multinivel: {e}", flush=True)
+        print(f"🚨 [DATABASE] Error al desplegar documento de texto: {e}", flush=True)
         return False
+
+def subir_archivo_binario_en_ruta(carpeta_raiz_id, ruta_sectores, nombre_archivo, flujo_bytes, mime_type):
+    """
+    [PROTOCOLO MULTIMEDIA]
+    Recibe un flujo de bytes en memoria de archivos físicos (Fotos, PDFs, Esquemas),
+    crea la ruta de carpetas necesaria y sube el archivo manteniendo su formato original.
+    """
+    service = obtener_servicio_drive()
+    if not service:
+        return False
+    try:
+        if not ruta_sectores or ruta_sectores.strip() in ['raiz', 'root', '/']:
+            id_destino_final = carpeta_raiz_id
+        else:
+            partes_ruta = [p.strip() for p in ruta_sectores.split('/') if p.strip()]
+            id_actual = carpeta_raiz_id
+            for parte in partes_ruta:
+                id_actual = _obtener_o_crear_subcarpeta_interna(service, parte, id_actual)
+            id_destino_final = id_actual
+
+        metadata = {
+            'name': nombre_archivo,
+            'parents': [id_destino_final]
+        }
+        
+        media = MediaIoBaseUpload(flujo_bytes, mimetype=mime_type, resumable=True)
+        file = service.files().create(body=metadata, media_body=media, fields='id').execute()
+        
+        print(f"📸 [DATABASE] Archivo multimedia indexado con éxito. ID: {file.get('id')}", flush=True)
+        return True
+    except Exception as e:
+        print(f"🚨 [DATABASE] Error al subir archivo binario a Drive: {e}", flush=True)
+        return False
+
+def crear_acceso_youtube_en_ruta(carpeta_raiz_id, ruta_sectores, titulo_video, url_video):
+    """
+    [PROTOCOLO DE ACCESO ULTRA-LIGERO]
+    Crea un reporte de texto individual con los datos y link del videotutorial de YouTube,
+    ahorrando espacio de almacenamiento en la unidad (Consumo: 0%).
+    """
+    contenido_acceso = (
+        f"==================================================\n"
+        f" VIDEOTUTORIAL DE CONFIGURACIÓN INDEXADO\n"
+        f"==================================================\n\n"
+        f"TÍTULO DEL VIDEO: {titulo_video}\n"
+        f"ENLACE DIRECTO:   {url_video}\n\n"
+        f"--------------------------------------------------\n"
+        f"Optimización de almacenamiento: Enlace web archivado."
+    )
+    return crear_documento_en_ruta(carpeta_raiz_id, ruta_sectores, titulo_video, contenido_acceso)
