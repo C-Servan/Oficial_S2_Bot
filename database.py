@@ -2,7 +2,7 @@ import os
 import io
 import json
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
 
 # Permisos requeridos para operar en Google Drive
@@ -133,3 +133,32 @@ def crear_acceso_youtube_en_ruta(carpeta_raiz_id, ruta_sectores, titulo_video, u
         f"Optimización de almacenamiento: Enlace web archivado."
     )
     return crear_documento_en_ruta(carpeta_raiz_id, ruta_sectores, titulo_video, contenido_acceso)
+
+def leer_texto_de_documento(file_id, mime_type):
+    """
+    [PROTOCOLO RAG] 
+    Descarga el contenido en texto plano de un documento de Drive para que la IA lo analice.
+    Esencial para evitar que la cascada cognitiva se quede a ciegas.
+    """
+    service = obtener_servicio_drive()
+    if not service:
+        return ""
+    try:
+        # Si es un documento nativo de Google Docs, hay que exportarlo a texto plano
+        if 'google-apps.document' in mime_type:
+            request = service.files().export_media(fileId=file_id, mimeType='text/plain')
+        else:
+            # Si es un .txt normal, se descarga directamente
+            request = service.files().get_media(fileId=file_id)
+        
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        
+        # Ignoramos posibles errores de caracteres extraños que podrían tumbar el sistema
+        return fh.getvalue().decode('utf-8', errors='ignore')
+    except Exception as e:
+        print(f"🚨 [DATABASE] Error táctico al leer documento para el RAG: {e}", flush=True)
+        return ""
