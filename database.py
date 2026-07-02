@@ -1,25 +1,31 @@
 import os
 import io
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
-# Ruta segura en el sistema de archivos de Render (Secret Files)
+# Ruta del archivo secreto en los servidores de Render
 CREDENTIALS_PATH = "/etc/secrets/google_creds.json"
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
 def obtener_servicio_drive():
-    """Inicializa de forma segura el cliente de la API de Google Drive"""
+    """Inicializa el cliente de Drive utilizando el nuevo protocolo OAuth2 de usuario"""
     if not os.path.exists(CREDENTIALS_PATH):
-        print("🚨 [CRÍTICO] Archivo de credenciales de Google Drive no encontrado en Render.", flush=True)
+        print("🚨 [CRÍTICO] Archivo de credenciales no encontrado en Render.", flush=True)
         return None
     try:
-        creds = service_account.Credentials.from_service_account_file(
-            CREDENTIALS_PATH, scopes=SCOPES
-        )
+        # Carga el token de usuario que acabamos de generar
+        creds = Credentials.from_authorized_user_file(CREDENTIALS_PATH, SCOPES)
+        
+        # Si el token de acceso rápido caduca, Google lo refresca solo en segundo plano
+        if creds and creds.expired and creds.refresh_token:
+            print("🔄 [SISTEMA] Token de acceso caducado. Refrescando credenciales...", flush=True)
+            creds.refresh(Request())
+            
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        print(f"🚨 [ERROR] Fallo al autenticar con Google Cloud: {e}", flush=True)
+        print(f"🚨 [ERROR] Fallo al autenticar con el protocolo OAuth2: {e}", flush=True)
         return None
 
 def listar_contenido_carpeta(folder_id):
