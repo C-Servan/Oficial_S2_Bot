@@ -1,173 +1,242 @@
 import os
+import io
+import json
 import telebot
-from flask import Flask
-from threading import Thread
-from ai_cascade import procesar_consulta_cascada
-from database import (
-    obtener_servicio_drive, 
-    buscar_subcarpeta_por_nombre, 
-    leer_texto_de_documento, 
-    crear_documento_autonomo,
-    crear_documento_en_ruta  # Nuevo componente táctico para resolver subcarpetas multinivel
-)
+import requests
+import scraper
+import database
 
-# --- CONFIGURACIÓN DE VARIABLES DE ENTORNO ---
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CARPETA_RAIZ_MANUALES_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+# ==========================================
+# 🛰️ CONFIGURACIÓN DE RESTRICCIONES Y LLAVES
+# ==========================================
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+DRIVE_FOLDER_ID = os.environ.get('DRIVE_FOLDER_ID') # Asegúrese de que coincide con su variable en Render
 
-# Validación crítica de la línea de suministro
-if not TOKEN or not CARPETA_RAIZ_MANUALES_ID:
-    raise ValueError("🚨 [CRÍTICO] Faltan variables de entorno esenciales (TELEGRAM_BOT_TOKEN o GOOGLE_DRIVE_FOLDER_ID) en Render.")
+# Llaves del Sistema de Cascada Cognitiva
+GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
+GROQ_KEY = os.environ.get('GROQ_API_KEY')
+DEEPSEEK_KEY = os.environ.get('DEEPSEEK_API_KEY')
 
 bot = telebot.TeleBot(TOKEN)
 
-# --- CADENA DE MANDO (IDs DE TELEGRAM) ---
-# REQUISITO RECOMENDADO: Edite estos IDs con sus números reales de Telegram
-COMANDANTE_ID = 1596889771  
-SARGENTOS_IDS = [953225999, 162691919]  
-
-def obtener_rango_usuario(user_id):
-    """Filtra el ID de Telegram y devuelve el rango militar correspondiente"""
-    if user_id == COMANDANTE_ID:
-        return "comandante"
-    elif user_id in SARGENTOS_IDS:
-        return "sargento"
-    return "recluta"
-
-def buscar_contexto_en_drive(consulta_usuario):
+# ==========================================
+# ⚡ MOTOR DE CASCADA COGNITIVA (AI FALLBACK)
+# ==========================================
+def analizar_con_cascada_ia(texto_art):
     """
-    RAG (Generación Aumentada por Recuperación):
-    Busca palabras clave en los nombres de los archivos dentro de Drive 
-    para extraer el manual correcto antes de enviárselo a la cascada de IA.
+    Gestiona la línea de contingencia de tres canales. 
+    Fuerza a las IAs a devolver una estructura de datos limpia (JSON).
     """
-    service = obtener_servicio_drive()
-    if not service:
-        return "No hay conexión con los servidores de almacenamiento de Drive."
-        
-    # Extraer palabras clave de más de 3 letras para la búsqueda (ej: 'gun4ir', 'batocera')
-    palabras = [p.lower() for p in consulta_usuario.split() if len(p) > 3]
-    if not palabras:
-        return "Consulta demasiado genérica para escanear los manuales técnicos."
-        
-    query_parts = [f"name contains '{p}'" for p in palabras]
-    or_query = " or ".join(query_parts)
-    query = f"('{CARPETA_RAIZ_MANUALES_ID}' in parents) and ({or_query}) and trashed = false"
-    
-    try:
-        results = service.files().list(q=query, fields="files(id, name, mimeType)").execute()
-        archivos = results.get('files', [])
-        
-        if not archivos:
-            return "No se encontraron manuales específicos para esta anomalía en el servidor principal."
-            
-        # Tomamos el primer archivo de coincidencia exacta como base de verdad
-        primer_archivo = archivos[0]
-        texto_manual = leer_texto_de_documento(primer_archivo['id'], primer_archivo['mimeType'])
-        return f"--- MANUAL RECOBRADO DEL SERVIDOR: {primer_archivo['name']} ---\n{texto_manual}"
-        
-    except Exception as e:
-        print(f"⚠️ [SISTEMA] Error en el escaneo RAG de Drive: {e}")
-        return "Error de enlace al consultar los almacenes de datos de Drive."
+    prompt_maestro = (
+        "Analiza el siguiente texto técnico de emulación/sistemas.\n"
+        "1. Clasifícalo decidiendo la subcarpeta ideal dentro de la jerarquía 'Sistemas/' "
+        "(ejemplo: 'Sistemas/Batocera/Configuracion', 'Sistemas/RetroBat/FAQ', etc.).\n"
+        "2. Asígnale un título descriptivo corto en minúsculas, usando guiones bajos en vez de espacios.\n"
+        "3. Genera un manual técnico resumido, limpio, estructurado y libre de paja.\n\n"
+        "Devuelve ÚNICAMENTE un objeto JSON con este formato exacto, sin bloques de código ni texto adicional:\n"
+        '{"ruta": "Sistemas/NombreSistema/Subcarpeta", "titulo": "nombre_del_manual", "resumen": "contenido del manual..."}\n\n'
+        f"Texto a analizar:\n{texto_art}"
+    )
 
-# --- MANEJADORES DE COMANDOS DE TELEGRAM ---
+    # --- 🔴 CANAL ALPHA: Gemini (Google) ---
+    if GEMINI_KEY:
+        print("🔴 [CASCADA] Activando Canal Alpha: Gemini...", flush=True)
+        try:
+            url_gemini = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+            payload = {"contents": [{"parts": [{"text": prompt_maestro}]}]}
+            res = requests.post(url_gemini, json=payload, timeout=15)
+            if res.status_code == 200:
+                raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
+                # Sanitizar si la IA envuelve el JSON en bloques de marcado
+                raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+                return json.loads(raw_text), "🔴 [Canal Alpha - Gemini]"
+        except Exception as e:
+            print(f"⚠️ [CASCADA] Falló Canal Alpha: {e}. Derivando al frente de reserva...", flush=True)
 
-@bot.message_handler(commands=['start', 'help'])
-def enviar_bienvenida(message):
-    """Mensaje de inicio del bot con formato oficial S-2"""
-    rango = obtener_rango_usuario(message.from_user.id)
-    saludo = f"🫡 ¡A sus órdenes, {rango.capitalize()}!\n\n"
-    saludo += "Oficial S-2 en línea. Central técnica de Lightguns y Emulación operativa.\n"
-    saludo += "• Formule su consulta técnica directamente en el chat.\n"
-    if rango in ["comandante", "sargento"]:
-        saludo += "• Comando de archivo activo: `/aprender [ruta/subcarpetas] [titulo] [contenido]`"
-    bot.reply_to(message, saludo, parse_mode="Markdown")
+    # --- 🔵 CANAL BRAVO: Groq / Llama 3 (Meta) ---
+    if GROQ_KEY:
+        print("🔵 [CASCADA] Activando Canal Bravo: Groq...", flush=True)
+        try:
+            url_groq = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
+            payload = {
+                "model": "llama3-8b-8192",
+                "messages": [{"role": "user", "content": prompt_maestro}],
+                "temperature": 0.2
+            }
+            res = requests.post(url_groq, json=payload, timeout=15)
+            if res.status_code == 200:
+                raw_text = res.json()['choices'][0]['message']['content']
+                raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+                return json.loads(raw_text), "🔵 [Canal Bravo - Groq]"
+        except Exception as e:
+            print(f"⚠️ [CASCADA] Falló Canal Bravo: {e}. Activando última línea de defensa...", flush=True)
 
+    # --- 🟢 CANAL CHARLIE: DeepSeek (Reserva Final) ---
+    if DEEPSEEK_KEY:
+        print("🟢 [CASCADA] Activando Canal Charlie: DeepSeek...", flush=True)
+        try:
+            url_deepseek = "https://api.deepseek.com/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {DEEPSEEK_KEY}", "Content-Type": "application/json"}
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt_maestro}],
+                "temperature": 0.2
+            }
+            res = requests.post(url_deepseek, json=payload, timeout=15)
+            if res.status_code == 200:
+                raw_text = res.json()['choices'][0]['message']['content']
+                raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+                return json.loads(raw_text), "🟢 [Canal Charlie - DeepSeek]"
+        except Exception as e:
+            print(f"🚨 [CASCADA] Línea de defensa rota. Fallaron todos los canales: {e}", flush=True)
+
+    return None, None
+
+
+# ==========================================
+# 🛰️ COMANDO CENTRALIZADO V2: /aprender
+# ==========================================
 @bot.message_handler(commands=['aprender'])
-def comando_aprender(message):
-    """
-    Protocolo de Auto-Aprendizaje. Organiza los manuales en subcarpetas específicas y profundas.
-    Formato: /aprender [ruta/subcarpeta/subsubcarpeta] [titulo] [contenido]
-    """
-    user_id = message.from_user.id
-    rango = obtener_rango_usuario(user_id)
+def comando_aprender_universal(message):
+    """Analizador táctico multifunción mediante el uso de Respuestas (Replies)."""
     
-    # Restricción estricta de seguridad perimetral
-    if rango == "recluta":
-        bot.reply_to(message, "❌ ¡Negativo Recluta! No tiene autorización de nivel S-2 para alterar los registros del servidor. Aléjese de la consola.")
+    # Defensa básica: Validar que sea una respuesta
+    if not message.reply_to_message:
+        bot.reply_to_message(message, "🎛️ *Instrucciones de Mando:*\nPara usar el sistema V2, envíe primero el link, video o archivo al chat, y luego respóndale escribiendo `/aprender [parámetros]`.", parse_mode="Markdown")
         return
 
-    # Extraer los argumentos del comando
-    argumentos = telebot.util.extract_arguments(message.text)
-    partes = argumentos.strip().split(" ", 2) if argumentos else []
+    m_origen = message.reply_to_message
+    argumentos = message.text.replace('/aprender', '').strip()
     
-    if len(partes) < 3:
-        bot.reply_to(message, "⚠️ [SISTEMA] Sintaxis incorrecta. Ordene: `/aprender [ruta/subcarpetas] [titulo_archivo] [contenido técnico]`\n\n*Ejemplo:* `/aprender gun4ir/config/errores leds_error Colocar los leds en orden...`", parse_mode="Markdown")
-        return
+    # Detectar el texto principal (puede venir en el mensaje o en el comentario de un archivo)
+    texto_evaluar = m_origen.text or m_origen.caption or ""
+    
+    # 🔍 VECTOR 1: Detección de Enlaces Web (Wikis o YouTube)
+    if "http://" in texto_evaluar or "https://" in texto_evaluar:
+        # Extraer la URL exacta del texto
+        urls = [palabra for palabra in texto_evaluar.split() if palabra.startswith("http")]
+        if not urls:
+            bot.reply_to_message(message, "❌ No se detectó una URL válida en el mensaje de origen.")
+            return
+        url_objetivo = urls[0]
+
+        # CASO A: Enlace de YouTube
+        if "youtube.com" in url_objetivo or "youtu.be" in url_objetivo:
+            if not argumentos:
+                bot.reply_to_message(message, "⚠️ *Error Táctico:* Para indexar videos de YouTube, defina la ruta de destino.\nEjemplo: `/aprender Sistemas/Batocera/Tutoriales`", parse_mode="Markdown")
+                return
+            
+            msg_espera = bot.reply_to_message(message, "📡 Conectando con los metadatos de YouTube...")
+            res_yt = scraper.extraer_titulo_youtube(url_objetivo)
+            
+            if res_yt:
+                exito = database.crear_acceso_youtube_en_ruta(DRIVE_FOLDER_ID, argumentos, res_yt['titulo'], res_yt['url_original'])
+                if exito:
+                    bot.edit_message_text(f"✅ *Indexado con éxito (0% Espacio):*\n📂 Ruta: `{argumentos}`\n🎥 Video: `{res_yt['titulo']}`", message.chat.id, msg_espera.message_id, parse_mode="Markdown")
+                else:
+                    bot.edit_message_text("❌ Error al desplegar el archivo de acceso en Drive.", message.chat.id, msg_espera.message_id)
+            else:
+                bot.edit_message_text("❌ No se pudo extraer la información del vídeo.", message.chat.id, msg_espera.message_id)
+            return
+
+        # CASO B: Enlace de Wiki (Análisis con IA)
+        else:
+            msg_espera = bot.reply_to_message(message, "🕷️ Raspando contenido de la web y ejecutando purga de basura...")
+            datos_wiki = scraper.raspar_wiki_universal(url_objetivo)
+            
+            if not datos_wiki or not datos_wiki['contenido']:
+                bot.edit_message_text("❌ Error al infiltrarse en la URL o cuerpo web vacío.", message.chat.id, msg_espera.message_id)
+                return
+                
+            bot.edit_message_text("🧠 Contenido purgado. Transmitiendo datos a la cascada de IA...", message.chat.id, msg_espera.message_id)
+            ia_resultado, canal_activo = analizar_con_cascada_ia(datos_wiki['contenido'])
+            
+            if not ia_resultado:
+                bot.edit_message_text("🚨 Error crítico: Ningún canal de IA pudo procesar la información.", message.chat.id, msg_espera.message_id)
+                return
+                
+            # Desplegar el documento de texto curado por la IA en Drive
+            bot.edit_message_text(f"🗄️ Clasificación aprobada por {canal_activo}.\nDesplegando estructuras en Drive...", message.chat.id, msg_espera.message_id)
+            
+            ruta_ia = ia_resultado['ruta']
+            titulo_ia = ia_resultado['titulo']
+            resumen_ia = ia_resultado['resumen']
+            
+            exito_txt = database.crear_documento_en_ruta(DRIVE_FOLDER_ID, ruta_ia, titulo_ia, resumen_ia)
+            
+            # Descargar y archivar imágenes adjuntas si existen en el artículo
+            imagenes_subidas = 0
+            if exito_txt and datos_wiki['imagenes']:
+                for i, img_url in enumerate(datos_wiki['imagenes']):
+                    try:
+                        r_img = requests.get(img_url, timeout=5)
+                        if r_img.status_code == 200:
+                            flujo_img = io.BytesIO(r_img.content)
+                            nombre_img = f"{titulo_ia}_adjunto_{i+1}.jpg"
+                            database.subir_archivo_binario_en_ruta(DRIVE_FOLDER_ID, ruta_ia, nombre_img, flujo_img, 'image/jpeg')
+                            imagenes_subidas += 1
+                    except:
+                        continue # Si una imagen falla, el bot prosigue con el despliegue
+
+            if exito_txt:
+                bot.edit_message_text(f"⚡ *Operación Completada por {canal_activo}*\n📂 *Ruta:* `{ruta_ia}`\n📄 *Archivo:* `{titulo_ia}.txt`\n📸 *Imágenes enlazadas:* {imagenes_subidas}", message.chat.id, msg_espera.message_id, parse_mode="Markdown")
+            else:
+                bot.edit_message_text("❌ Error al escribir el reporte final en Google Drive.", message.chat.id, msg_espera.message_id)
+            return
+
+    # 📂 VECTOR 2: Gestión de Archivos Físicos (Fotos o PDFs)
+    elif m_origen.content_type in ['photo', 'document']:
+        if not argumentos:
+            bot.reply_to_message(message, "⚠️ *Error de Coordenadas:* Indique la ruta y el nombre deseado.\nEjemplo: `/aprender Sistemas/Batocera/Hardware esquema_pantalla`", parse_mode="Markdown")
+            return
+            
+        msg_espera = bot.reply_to_message(message, "📥 Capturando transmisión de archivo en la RAM de Render...")
         
-    ruta_sectores = partes[0]  # Ahora puede recibir estructuras como 'emulacion/batocera/bios'
-    titulo_nuevo = partes[1]
-    contenido_nuevo = partes[2]
-    
-    bot.send_message(message.chat.id, f"💾 [SISTEMA] {rango.upper()} ordenó indexar datos en el sector: `{ruta_sectores}`. Escaneando y creando árbol de directorios...", parse_mode="Markdown")
-    
-    # Guardar de forma remota en Google Drive resolviendo dinámicamente toda la ruta
-    exito = crear_documento_en_ruta(CARPETA_RAIZ_MANUALES_ID, ruta_sectores, titulo_nuevo, contenido_nuevo)
-    
-    if exito:
-        bot.reply_to(message, f"🗄️ [LOG] Almacenamiento completado. El conocimiento técnico *'{titulo_nuevo}'* ha sido archivado con éxito en la ruta de destino: `{ruta_sectores}`.", parse_mode="Markdown")
+        try:
+            # Procesar si es una Foto
+            if m_origen.content_type == 'photo':
+                file_id = m_origen.photo[-1].file_id # Máxima resolución disponible
+                mime_type = 'image/jpeg'
+                extension = '.jpg'
+            # Procesar si es un Documento (PDF u otros)
+            else:
+                file_id = m_origen.document.file_id
+                mime_type = m_origen.document.mime_type
+                extension = os.path.splitext(m_origen.document.file_name)[1] or '.dat'
+
+            # Desglosar los argumentos en Ruta + Nombre
+            partes_args = argumentos.split()
+            if len(partes_args) > 1:
+                nombre_archivo = partes_args[-1] + extension
+                ruta_destino = " ".join(partes_args[:-1])
+            else:
+                nombre_archivo = f"archivo_archivado_{message.message_id}{extension}"
+                ruta_destino = partes_args[0]
+
+            # Descarga del binario
+            file_info = bot.get_file(file_id)
+            binario_descargado = bot.download_file(file_info.file_path)
+            flujo_bytes = io.BytesIO(binario_descargado)
+            
+            # Subir a Drive
+            exito_bin = database.subir_archivo_binario_en_ruta(DRIVE_FOLDER_ID, ruta_destino, nombre_archivo, flujo_bytes, mime_type)
+            
+            if exito_bin:
+                bot.edit_message_text(f"✅ *Archivo Físico Almacenado:*\n📂 Ruta: `{ruta_destino}`\n📦 Nombre: `{nombre_archivo}`", message.chat.id, msg_espera.message_id, parse_mode="Markdown")
+            else:
+                bot.edit_message_text("❌ Falló la transmisión binaria hacia Google Drive.", message.chat.id, msg_espera.message_id)
+                
+        except Exception as e:
+            bot.edit_message_text(f"🚨 Error crítico en el módulo de archivos: {e}", message.chat.id, msg_espera.message_id)
+        return
+
     else:
-        bot.reply_to(message, "🚨 [ERROR] El ala de almacenamiento de Drive no respondió correctamente o el token OAuth2 rechazó la creación de las subcarpetas. Revise Render.", parse_mode="Markdown")
+        bot.reply_to_message(message, "❌ El mensaje al que responde no contiene un formato compatible (Link, Video, Foto o PDF).")
 
-@bot.message_handler(func=lambda message: True)
-def escuchar_consultas(message):
-    """Intercepta cualquier mensaje de texto, busca en Drive y responde con la cascada de IA"""
-    # Ignorar comandos si entran por aquí
-    if message.text.startswith('/'):
-        return
-        
-    user_id = message.from_user.id
-    rango = obtener_rango_usuario(user_id)
-    consulta = message.text
-    
-    # Enviar señal visual de que el bot está procesando los datos
-    bot.send_chat_action(message.chat.id, 'typing')
-    
-    # Paso 1: Extraer el contexto real desde los manuales de Google Drive (RAG)
-    contexto_manual = buscar_contexto_en_drive(consulta)
-    
-    # Paso 2: Ejecutar el análisis cognitivo con el sistema de cascada (Gemini -> Groq -> DeepSeek)
-    respuesta_final = procesar_consulta_cascada(rango, consulta, contexto_manual)
-    
-    # Paso 3: Entregar la respuesta al frente de batalla
-    bot.reply_to(message, respuesta_final, parse_mode="Markdown")
-
-# --- PARCHE DE COMPATIBILIDAD PARA RENDER (FLASK DUMMY SERVER) ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Oficial S-2: Servidor en línea y operativo."
-
-def run():
-    # Render asigna automáticamente un puerto en la variable de entorno PORT
-    puerto = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=puerto)
-
-def mantener_vivo():
-    t = Thread(target=run)
-    t.start()
-
-# --- ARRANQUE SEGURO DEL MOTOR ---
+# ==========================================
+# 🚀 ARRANQUE DE SISTEMAS EN RENDER
+# ==========================================
 if __name__ == "__main__":
-    print("🌐 [SISTEMA] Activando servidor de flancos para Render...")
-    mantener_vivo()  # Engaña a Render diciendo "estoy escuchando el puerto web"
-    
-    print("🧹 [SISTEMA] Purgando el búfer de Telegram para eliminar duplicados...")
-    try:
-        # Esto elimina el proceso fantasma y limpia los mensajes acumulados de golpe
-        bot.delete_webhook(drop_pending_updates=True)
-    except Exception as e:
-        print(f"⚠️ [SISTEMA] Nota de purga: {e}")
-    
-    print("🚀 [SISTEMA] Oficial S-2 desplegado con éxito. Escuchando frecuencias...")
+    print("🛰️ [SISTEMA CENTRAL] Servidor V2 operativo. Escuchando canales...", flush=True)
     bot.infinity_polling()
