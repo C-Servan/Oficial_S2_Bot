@@ -7,44 +7,21 @@ import requests
 import scraper
 import database
 import threading
-import signal
-import sys
 from flask import Flask
 
 # ==========================================
 # 🛰️ CONFIGURACIÓN DE RESTRICCIONES Y LLAVES
 # ==========================================
-TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+# Se añade 'DUMMY' por defecto para evitar que Render aborte el despliegue
+# si comprueba el código antes de inyectar las variables de entorno reales.
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'DUMMY')
 DRIVE_FOLDER_ID = os.environ.get('DRIVE_FOLDER_ID')
 
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
 GROQ_KEY = os.environ.get('GROQ_API_KEY')
 DEEPSEEK_KEY = os.environ.get('DEEPSEEK_API_KEY')
 
-if not TOKEN or not DRIVE_FOLDER_ID:
-    raise ValueError("🚨 ERROR CRÍTICO: Las variables obligatorias TELEGRAM_BOT_TOKEN o DRIVE_FOLDER_ID no están configuradas.")
-
 bot = telebot.TeleBot(TOKEN)
-
-# Control de estado global para apagados limpios
-ejecutando = True
-
-# ==========================================
-# 🛑 GESTOR DE APAGADO INTERNO (ANTI-CONFLICTO 409)
-# ==========================================
-def manejar_sigterm(signum, frame):
-    """Intercepta la orden de Render para aniquilar la instancia vieja al instante."""
-    global ejecutando
-    print("🛑 [SIGTERM] Render ordena apagar la instancia antigua. Liberando el token de Telegram de inmediato...", flush=True)
-    ejecutando = False
-    try:
-        bot.stop_polling()
-    except:
-        pass
-    sys.exit(0)
-
-# Registrar la señal SIGTERM del sistema operativo para el proceso
-signal.signal(signal.SIGTERM, manejar_sigterm)
 
 # ==========================================
 # 🌍 CONFIGURACIÓN FLASK + MONITOR ANTI-DORMIR
@@ -136,7 +113,6 @@ def analizar_con_cascada_ia(texto_art):
             print(f"🚨 [CASCADA] Línea de defensa rota. Fallaron todos los canales: {e}", flush=True)
 
     return None, None
-
 
 # ==========================================
 # 🛰️ COMANDO CENTRALIZADO V2: /aprender
@@ -267,38 +243,27 @@ def comando_aprender_universal(message):
 
 
 # ==========================================
-# 🚀 HILO INTELIGENTE TOLERANTE A ERRORES 409
+# 🚀 HILO INMORTAL DE ESCUCHA (TELEGRAM POLLING)
 # ==========================================
 def lanzar_polling_bot():
-    """Ejecuta la escucha controlando los bloqueos por solapamiento de Render de forma nativa."""
-    global ejecutando
-    
-    print("🧹 [SISTEMA] Removiendo ganchos y webhooks antiguos de Telegram...", flush=True)
-    try:
-        bot.remove_webhook()
-    except:
-        pass
-        
-    print("🛰️ [SISTEMA CENTRAL] Hilo secundario del bot iniciado de forma segura.", flush=True)
-    
-    while ejecutando:
+    """Ejecuta la escucha en un bucle infinito autorreparable ante caídas de red."""
+    while True:
         try:
-            # none_stop=False permite delegar el control de errores a nuestro bucle while,
-            # lo que evita los bucles infinitos de caídas que sufre infinity_polling en Render.
-            bot.polling(none_stop=False, skip_pending=True, timeout=40, long_polling_timeout=20)
-        except telebot.apihelper.ApiTelegramException as e:
-            if e.error_code == 409:
-                print("⚠️ [CONFLICTO 409] Solapamiento en Render detectado. La instancia vieja aún está liberando el token.", flush=True)
-                print("Dormimos 10 segundos para dejar que el sistema limpie el puerto y reintentamos...", flush=True)
-                time.sleep(10)
-            else:
-                print(f"⚠️ [API EXCEPTION] Error de Telegram {e.error_code}: {e}. Reintentando en 5s...", flush=True)
+            # Protegemos el polling para que no falle si el token es el temporal (DUMMY)
+            if bot.token == 'DUMMY':
+                print("⏳ Esperando inyección de variables de entorno de Render...", flush=True)
                 time.sleep(5)
+                # Actualiza el token si Render lo acaba de cargar
+                bot.token = os.environ.get('TELEGRAM_BOT_TOKEN', 'DUMMY')
+                continue
+
+            print("🧹 [SISTEMA] Removiendo ganchos y webhooks antiguos de Telegram...", flush=True)
+            bot.remove_webhook()
+            print("🛰️ [SISTEMA CENTRAL] Hilo secundario del bot iniciado de forma segura.", flush=True)
+            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
         except Exception as e:
-            if not ejecutando:
-                break
-            print(f"🚨 [ALERTA] Caída de red detectada: {e}. Reiniciando en 5 segundos...", flush=True)
-            time.sleep(5)
+            print(f"🚨 [ALERTA] Caída crítica detectada en el hilo del bot: {e}. Reiniciando bucle en 10 segundos...", flush=True)
+            time.sleep(10)
 
 
 if __name__ == "__main__":
